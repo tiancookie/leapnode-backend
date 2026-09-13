@@ -1,0 +1,49 @@
+# LeapNode 后端配置文件
+# 环境变量优先级高于本文件 (LEAPNODE_*)
+
+server:
+  http_addr: ":8080"
+  mode: "debug"          # debug / release
+  read_timeout: 15s
+  write_timeout: 15s
+
+# PostgreSQL (与 New-API 共享同一数据库)
+postgres:
+  host: "127.0.0.1"
+  port: 5432
+  user: "leapnode"
+  password: "leapnode"
+  dbname: "leapnode"
+  sslmode: "disable"
+  timezone: "UTC"
+  max_open_conns: 50
+  max_idle_conns: 10
+  conn_max_lifetime: 1h
+
+# Redis (缓存 + 异步结算队列)
+redis:
+  addr: "127.0.0.1:6379"
+  password: ""
+  db: 0
+
+# New-API 集成
+newapi:
+  base_url: "http://127.0.0.1:3000"
+  # 与 New-API 共享的 JWT / session 密钥, 部署时通过环境变量注入
+  shared_secret: ""
+
+# 业务参数
+business:
+  quota_per_dollar: 500000        # Quota 体系: 500,000 = $1.00
+  referral_register_reward: 0.10  # 注册奖励 (USD)
+  referral_first_topup_reward: 1.00 # 首充奖励 (USD)
+  default_merchant_commission: 0.30 # 商家默认分成比例
+
+# 支付渠道 (密钥通过环境变量注入, 请勿提交明文)
+payment:
+  epay:
+    enabled: false
+  stripe:
+    enabled: false
+  crypto:
+    enabled: false

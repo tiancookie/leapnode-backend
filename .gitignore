@@ -1,0 +1,32 @@
+# Binaries
+/bin/
+/dist/
+*.exe
+*.out
+/leapnode-backend
+/server
+/cmd/server/server
+
+# Go
+vendor/
+*.test
+*.prof
+go.work
+go.work.sum
+
+# Env & secrets
+.env
+.env.*
+config/config.local.yaml
+*.pem
+*.key
+
+# Logs
+*.log
+logs/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
