@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:14-alpine
+    container_name: leapnode-db
+    environment:
+      POSTGRES_USER: leapnode
+      POSTGRES_PASSWORD: leapnode123
+      POSTGRES_DB: leapnode
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d
+
+  redis:
+    image: redis:7-alpine
+    container_name: leapnode-redis
+    ports:
+      - "6379:6379"
+
+  backend:
+    build: .
+    container_name: leapnode-backend
+    depends_on:
+      - postgres
+      - redis
+    ports:
+      - "8080:8080"
+    environment:
+      DATABASE_URL: postgres://leapnode:leapnode123@postgres:5432/leapnode?sslmode=disable
+      REDIS_URL: redis://redis:6379
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
