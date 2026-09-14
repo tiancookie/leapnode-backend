@@ -391,4 +391,35 @@ ALTER TABLE IF EXISTS key_groups ADD COLUMN IF NOT EXISTS tags            VARCHA
 ALTER TABLE IF EXISTS key_groups ADD COLUMN IF NOT EXISTS is_recommended  BOOLEAN DEFAULT FALSE;
 ALTER TABLE IF EXISTS key_groups ADD COLUMN IF NOT EXISTS is_unavailable  BOOLEAN DEFAULT FALSE;
 
+-- =============================================================================
+-- PART 5: USDT/加密货币充值订单表 (固定收款地址 + 动态金额尾数匹配模式)
+--   固定平台钱包收款, 靠"每单唯一 pay_amount"匹配到具体订单。
+--   distributor_id 预留多租户隔离 (0=总站); USDT 总站/分站可共用总站配置,
+--   支付宝/Stripe 各自配置(本批不做, 但字段结构预留归属区分)。
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS crypto_topup_orders (
+    id             BIGSERIAL PRIMARY KEY,
+    trade_no       VARCHAR(64)  NOT NULL UNIQUE,       -- 唯一订单号 (业务主键)
+    user_id        INT          NOT NULL,             -- 下单用户 (users.id)
+    distributor_id INT          NOT NULL DEFAULT 0,    -- 0=总站, >0=分站, 多租户隔离
+    chain          VARCHAR(20)  NOT NULL,             -- tron/eth/bsc/polygon/solana (前端 CRYPTO_NETWORKS key)
+    token          VARCHAR(20)  NOT NULL,             -- usdt/usdc
+    currency       VARCHAR(10)  NOT NULL DEFAULT 'USD', -- 用户下单法币 USD/CNY
+    base_amount    DECIMAL(20,6) NOT NULL,            -- 用户输入的原始金额(法币/USDT)
+    pay_amount     DECIMAL(20,6) NOT NULL,            -- 精确应付金额 = base + 随机尾数 (同链同地址唯一)
+    quota          BIGINT       NOT NULL DEFAULT 0,    -- 到账后应加的 quota (Q=500000/$)
+    wallet_address VARCHAR(128) NOT NULL,             -- 该链平台收款地址(固定, 可配置)
+    tx_hash        VARCHAR(128) NOT NULL DEFAULT '',   -- 用户提交/对账命中的链上交易 hash
+    status         VARCHAR(20)  NOT NULL DEFAULT 'pending', -- pending/reviewing/success/expired/failed
+    tier_index     INT          NOT NULL DEFAULT -1,   -- 前端预设档位下标(可选, -1=无)
+    created_at     TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    expire_at      TIMESTAMPTZ  NOT NULL,             -- 过期时间 (created + crypto_expiry_minutes)
+    paid_at        TIMESTAMPTZ                         -- 确认到账时间 (nullable)
+);
+CREATE INDEX IF NOT EXISTS idx_crypto_topup_user       ON crypto_topup_orders(user_id);
+CREATE INDEX IF NOT EXISTS idx_crypto_topup_status     ON crypto_topup_orders(status);
+CREATE INDEX IF NOT EXISTS idx_crypto_topup_dist       ON crypto_topup_orders(distributor_id);
+-- 动态金额匹配的核心索引: 同链+同收款地址+状态 上按 pay_amount 查重/匹配
+CREATE INDEX IF NOT EXISTS idx_crypto_topup_match      ON crypto_topup_orders(chain, wallet_address, status, pay_amount);
+
 COMMIT;

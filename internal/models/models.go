@@ -72,23 +72,23 @@ type Subscription struct {
 
 // KeyGroup 密钥分组 -> key_groups
 type KeyGroup struct {
-	ID               uint      `gorm:"primaryKey" json:"id"`
-	DistributorID    int       `gorm:"default:0" json:"distributor_id"`
-	Name             string    `json:"name"`
-	VendorCategory   string    `json:"vendor_category"`
-	DiscountRatio    float64   `json:"discount_ratio"`
-	PriceDiscount    float64   `json:"price_discount"`
-	RmbPerUsd        float64   `json:"rmb_per_usd"`
-	DiscountLabel    string    `json:"discount_label"`
-	Description      string    `json:"description"`
-	Tags             string    `json:"tags"`
-	IsRecommended    bool      `json:"is_recommended"`
-	IsUnavailable    bool      `json:"is_unavailable"`
-	LeoThreshold     int64     `json:"leo_threshold"`
-	LockedUserCount  int       `gorm:"default:0" json:"locked_user_count"`
-	IncludedModels   []string  `gorm:"type:text[]" json:"included_models"`
-	Status           int       `gorm:"default:1" json:"status"`
-	CreatedAt        time.Time `json:"created_at"`
+	ID              uint      `gorm:"primaryKey" json:"id"`
+	DistributorID   int       `gorm:"default:0" json:"distributor_id"`
+	Name            string    `json:"name"`
+	VendorCategory  string    `json:"vendor_category"`
+	DiscountRatio   float64   `json:"discount_ratio"`
+	PriceDiscount   float64   `json:"price_discount"`
+	RmbPerUsd       float64   `json:"rmb_per_usd"`
+	DiscountLabel   string    `json:"discount_label"`
+	Description     string    `json:"description"`
+	Tags            string    `json:"tags"`
+	IsRecommended   bool      `json:"is_recommended"`
+	IsUnavailable   bool      `json:"is_unavailable"`
+	LeoThreshold    int64     `json:"leo_threshold"`
+	LockedUserCount int       `gorm:"default:0" json:"locked_user_count"`
+	IncludedModels  []string  `gorm:"type:text[]" json:"included_models"`
+	Status          int       `gorm:"default:1" json:"status"`
+	CreatedAt       time.Time `json:"created_at"`
 }
 
 // DistributorModelListing 分站模型上架表 -> distributor_model_listings
@@ -263,4 +263,39 @@ type TopupOrder struct {
 
 func (TopupOrder) TableName() string {
 	return "topup_orders"
+}
+
+// CryptoTopupOrder USDT/加密货币充值订单 -> crypto_topup_orders
+//
+// 固定收款地址 + 动态金额尾数匹配模式:
+//   - 平台配置固定钱包 (wallet_address), 不给每个用户生成独立地址
+//   - 靠"每单唯一 pay_amount"在 (chain + wallet_address + 时间窗) 内匹配订单
+//   - pay_amount = base_amount + 随机小数尾数, 保证同链同地址 pending 订单金额不撞
+//
+// distributor_id 预留多租户隔离 (0=总站): USDT 总站/分站可共用总站配置。
+// Status 语义: pending(待支付) reviewing(已提交hash待对账) success(已到账)
+//
+//	expired(超时未付) failed(对账失败)。
+type CryptoTopupOrder struct {
+	ID            int64      `gorm:"primaryKey;column:id" json:"id"`
+	TradeNo       string     `gorm:"column:trade_no;uniqueIndex" json:"trade_no"`
+	UserID        int        `gorm:"column:user_id" json:"user_id"`
+	DistributorID int        `gorm:"column:distributor_id;default:0" json:"distributor_id"`
+	Chain         string     `gorm:"column:chain" json:"chain"` // tron/eth/bsc/polygon/solana
+	Token         string     `gorm:"column:token" json:"token"` // usdt/usdc
+	Currency      string     `gorm:"column:currency;default:USD" json:"currency"`
+	BaseAmount    float64    `gorm:"column:base_amount" json:"base_amount"`
+	PayAmount     float64    `gorm:"column:pay_amount" json:"pay_amount"`
+	Quota         int64      `gorm:"column:quota;default:0" json:"quota"`
+	WalletAddress string     `gorm:"column:wallet_address" json:"wallet_address"`
+	TxHash        string     `gorm:"column:tx_hash;default:''" json:"tx_hash"`
+	Status        string     `gorm:"column:status;default:pending" json:"status"`
+	TierIndex     int        `gorm:"column:tier_index;default:-1" json:"tier_index"`
+	CreatedAt     time.Time  `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	ExpireAt      time.Time  `gorm:"column:expire_at" json:"expire_at"`
+	PaidAt        *time.Time `gorm:"column:paid_at" json:"paid_at,omitempty"`
+}
+
+func (CryptoTopupOrder) TableName() string {
+	return "crypto_topup_orders"
 }
