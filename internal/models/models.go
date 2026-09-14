@@ -138,7 +138,7 @@ type User struct {
 	AffQuota        int64  `gorm:"column:aff_quota" json:"aff_quota"`
 	AffHistoryQuota int64  `gorm:"column:aff_history" json:"aff_history_quota"`
 	InviterID       int    `gorm:"column:inviter_id" json:"inviter_id"`
-	CreatedTime     int64  `gorm:"column:created_time" json:"created_time"` // Unix 秒
+	CreatedTime     int64  `gorm:"autoCreateTime;column:created_at" json:"created_time"` // New-API 列名 created_at, 前端契约字段 created_time
 
 	// --- LeapNode 扩展列 ---
 	UserLevel     int    `gorm:"column:user_level;default:0" json:"user_level"`
