@@ -5,7 +5,7 @@ WORKDIR /app
 
 # 复制 go.mod 和 go.sum
 COPY go.mod go.sum ./
-RUN go mod download
+RUN go mod tidy && go mod download
 
 # 复制源代码
 COPY . .
