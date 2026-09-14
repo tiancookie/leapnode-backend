@@ -14,6 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
 	"github.com/tiancookie/leapnode-backend/internal/controllers"
+	"github.com/tiancookie/leapnode-backend/internal/middleware"
 	"github.com/tiancookie/leapnode-backend/internal/services"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -80,10 +81,23 @@ func main() {
 	siteService := services.NewSiteService(db)
 	siteController := controllers.NewSiteController(siteService)
 
+	userService := services.NewUserService(db)
+	userController := controllers.NewUserController(userService)
+
 	dist := router.Group("/api/dist")
 	{
 		siteGroup := dist.Group("/site")
 		siteController.RegisterRoutes(siteGroup)
+
+		// 用户认证: 公开路由 (注册/登录/登出)
+		userGroup := dist.Group("/user")
+		userController.RegisterPublicRoutes(userGroup)
+
+		// 用户账户: 受保护路由 (self/password/language)
+		// 走 AuthRequired: New-Api-User 头 + Session Cookie 双重校验
+		userProtected := dist.Group("/user")
+		userProtected.Use(middleware.AuthRequired(db))
+		userController.RegisterProtectedRoutes(userProtected)
 	}
 
 	srv := &http.Server{

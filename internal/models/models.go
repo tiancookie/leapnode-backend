@@ -115,6 +115,42 @@ type Announcement struct {
 	CreatedAt        time.Time `json:"created_at"`
 }
 
+// User New-API 原生用户表 (含 LeapNode 扩展字段) -> users
+//
+// 字段命名严格对齐 New-API 的 users 表列名, 以保证与 New-API AutoMigrate
+// 建出的表 100% 兼容 (不新增/不改动 New-API 已有列)。
+// LeapNode 扩展列 (user_level/merchant_id/distributor_id/language) 由
+// migrations/001_initial_schema.sql 以幂等 ALTER 追加。
+type User struct {
+	ID              int    `gorm:"primaryKey;column:id" json:"id"`
+	Username        string `gorm:"column:username" json:"username"`
+	Password        string `gorm:"column:password" json:"-"` // 绝不序列化到响应
+	DisplayName     string `gorm:"column:display_name" json:"display_name"`
+	Role            int    `gorm:"column:role" json:"role"`     // 1=普通用户 10=管理员 100=超管 (New-API 语义)
+	Status          int    `gorm:"column:status" json:"status"` // 1=正常 2=禁用
+	Email           string `gorm:"column:email" json:"email"`
+	Quota           int64  `gorm:"column:quota" json:"quota"`
+	UsedQuota       int64  `gorm:"column:used_quota" json:"used_quota"`
+	RequestCount    int    `gorm:"column:request_count" json:"request_count"`
+	Group           string `gorm:"column:group" json:"group"`
+	AffCode         string `gorm:"column:aff_code" json:"aff_code"`
+	AffCount        int    `gorm:"column:aff_count" json:"aff_count"`
+	AffQuota        int64  `gorm:"column:aff_quota" json:"aff_quota"`
+	AffHistoryQuota int64  `gorm:"column:aff_history_quota" json:"aff_history_quota"`
+	InviterID       int    `gorm:"column:inviter_id" json:"inviter_id"`
+	CreatedTime     int64  `gorm:"column:created_time" json:"created_time"` // Unix 秒
+
+	// --- LeapNode 扩展列 ---
+	UserLevel     int    `gorm:"column:user_level;default:0" json:"user_level"`
+	MerchantID    *int   `gorm:"column:merchant_id" json:"merchant_id,omitempty"`
+	DistributorID *int   `gorm:"column:distributor_id" json:"distributor_id,omitempty"`
+	Language      string `gorm:"column:language" json:"language,omitempty"`
+}
+
+func (User) TableName() string {
+	return "users"
+}
+
 // --- New-API native tables (read-only for these endpoints) ---
 
 // Ability New-API 原生模型能力表 (只读)

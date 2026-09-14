@@ -19,6 +19,7 @@ BEGIN;
 ALTER TABLE IF EXISTS users ADD COLUMN IF NOT EXISTS user_level    INT DEFAULT 0; -- 0=普通用户 1=分站用户 2=商家(KOL) 3=分站站长 9=总站管理员
 ALTER TABLE IF EXISTS users ADD COLUMN IF NOT EXISTS merchant_id   INT;           -- 关联 merchants.id
 ALTER TABLE IF EXISTS users ADD COLUMN IF NOT EXISTS distributor_id INT;          -- 关联 distributor_sites.id
+ALTER TABLE IF EXISTS users ADD COLUMN IF NOT EXISTS language      VARCHAR(16);    -- 用户界面语言 (PUT /api/dist/user/language)
 
 -- channels 表: 商家渠道 + 定价
 ALTER TABLE IF EXISTS channels ADD COLUMN IF NOT EXISTS merchant_id  INT;
