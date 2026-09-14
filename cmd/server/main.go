@@ -96,6 +96,9 @@ func main() {
 	adminService := services.NewAdminService(db)
 	adminController := controllers.NewAdminController(adminService)
 
+	merchantService := services.NewMerchantService(db)
+	merchantController := controllers.NewMerchantController(merchantService)
+
 	dist := router.Group("/api/dist")
 	{
 		siteGroup := dist.Group("/site")
@@ -146,6 +149,14 @@ func main() {
 	admin.Use(middleware.AdminAuth())
 	{
 		adminController.RegisterRoutes(admin)
+	}
+
+	// 商家中心: /api/merchant/* (需要 AuthRequired + MerchantAuth)
+	merchant := router.Group("/api/merchant")
+	merchant.Use(middleware.AuthRequired(db))
+	merchant.Use(middleware.MerchantAuth())
+	{
+		merchantController.RegisterRoutes(merchant)
 	}
 
 	srv := &http.Server{

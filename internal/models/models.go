@@ -365,3 +365,92 @@ type WithdrawalRequest struct {
 func (WithdrawalRequest) TableName() string {
 	return "affiliate_payouts"
 }
+
+// MerchantChannel 商家上游渠道 -> channels (扩展商家渠道查询)
+// 使用 New-API 原生 Channel 类型，但只查询 merchant_id = 当前商家的记录
+type MerchantChannel = Channel
+
+// MerchantModel 商家模型（待审批/已上架）-> model_approvals
+type MerchantModel struct {
+	ID           uint       `gorm:"primaryKey" json:"id"`
+	MerchantID   uint       `json:"merchant_id"`
+	ModelName    string     `json:"model_name"`
+	ChannelID    int        `json:"channel_id"`
+	InputPrice   float64    `json:"input_price"`
+	OutputPrice  float64    `json:"output_price"`
+	ApprovalType string     `json:"approval_type"` // create/update/delete
+	Status       int        `json:"status"`        // 0=待审核 1=通过 2=拒绝
+	AdminID      *int       `json:"admin_id"`
+	AdminRemark  string     `json:"admin_remark"`
+	SubmittedAt  time.Time  `json:"submitted_at"`
+	ProcessedAt  *time.Time `json:"processed_at"`
+}
+
+func (MerchantModel) TableName() string {
+	return "model_approvals"
+}
+
+// MerchantRevenueRecord 商家收益记录 -> merchant_revenue_records
+type MerchantRevenueRecord struct {
+	ID          int64     `gorm:"primaryKey" json:"id"`
+	MerchantID  int       `json:"merchant_id"`
+	ModelName   string    `json:"model_name"`
+	OrderID     string    `json:"order_id"`
+	Revenue     float64   `json:"revenue"`     // 商家收益（美元）
+	Cost        float64   `json:"cost"`        // 上游成本（美元）
+	Profit      float64   `json:"profit"`      // 净利润（美元）
+	RequestDate time.Time `json:"request_date"` // 请求日期（用于按日统计）
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+func (MerchantRevenueRecord) TableName() string {
+	return "merchant_revenue_records"
+}
+
+// SupportTicket 工单 -> tickets
+type SupportTicket struct {
+	ID         uint       `gorm:"primaryKey" json:"id"`
+	UserID     int        `json:"user_id"`
+	TicketType string     `json:"ticket_type"`
+	Title      string     `json:"title"`
+	Content    string     `json:"content"`
+	Priority   string     `json:"priority"` // low/normal/high/urgent
+	Status     int        `json:"status"`   // 0=待处理 1=处理中 2=已解决 3=关闭
+	AdminReply string     `json:"admin_reply"`
+	CreatedAt  time.Time  `json:"created_at"`
+	ResolvedAt *time.Time `json:"resolved_at"`
+}
+
+func (SupportTicket) TableName() string {
+	return "tickets"
+}
+
+// AnnouncementRead 公告已读记录 -> announcement_reads
+type AnnouncementRead struct {
+	ID             int       `gorm:"primaryKey" json:"id"`
+	UserID         int       `json:"user_id"`
+	AnnouncementID int       `json:"announcement_id"`
+	ReadAt         time.Time `json:"read_at"`
+}
+
+func (AnnouncementRead) TableName() string {
+	return "announcement_reads"
+}
+
+// RedeemCode 兑换码 -> redeem_codes
+type RedeemCode struct {
+	Code           string     `gorm:"primaryKey" json:"code"`
+	DistributorID  int        `json:"distributor_id"`
+	Quota          int64      `json:"quota"`
+	BatchName      string     `json:"batch_name"`
+	UsedBy         *int       `json:"used_by"`
+	UsedAt         *time.Time `json:"used_at"`
+	Status         int        `json:"status"` // 0=未使用 1=已使用 2=作废
+	ExpireAt       *time.Time `json:"expire_at"`
+	CreatedAt      time.Time  `json:"created_at"`
+	MerchantID     *int       `json:"merchant_id"` // 商家生成的兑换码
+}
+
+func (RedeemCode) TableName() string {
+	return "redeem_codes"
+}
