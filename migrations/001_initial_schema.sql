@@ -422,4 +422,49 @@ CREATE INDEX IF NOT EXISTS idx_crypto_topup_dist       ON crypto_topup_orders(di
 -- 动态金额匹配的核心索引: 同链+同收款地址+状态 上按 pay_amount 查重/匹配
 CREATE INDEX IF NOT EXISTS idx_crypto_topup_match      ON crypto_topup_orders(chain, wallet_address, status, pay_amount);
 
+-- =============================================================================
+-- PART 6: 分站支付配置表 (Week 10.3)
+--   分站在"站点与开发 > 站点设置"配置自己的支付渠道:
+--     - usdt:   分站勾选启用, 复用总站钱包配置 (config 可留空)
+--     - alipay: 分站配置自己的易支付账号 (config: pid/key/api_url)
+--     - stripe: 分站配置自己的 Stripe Key (config: publishable_key/secret_key)
+--   一个分站每种支付类型仅一条记录 (UNIQUE)。
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS distributor_payment_configs (
+    id             SERIAL PRIMARY KEY,
+    distributor_id INT          NOT NULL,
+    payment_type   VARCHAR(20)  NOT NULL,              -- 'usdt' / 'alipay' / 'stripe'
+    enabled        BOOLEAN      DEFAULT FALSE,
+    config         JSONB,                              -- 易支付账号 / Stripe Key 等
+    created_at     TIMESTAMP    DEFAULT NOW(),
+    updated_at     TIMESTAMP    DEFAULT NOW(),
+    UNIQUE(distributor_id, payment_type)
+);
+CREATE INDEX IF NOT EXISTS idx_dpc_distributor_id ON distributor_payment_configs(distributor_id);
+
+-- =============================================================================
+-- PART 7: 分站 API 密钥表 (Week 10.3)
+--   "站点与开发 > API密钥"页面: 分站可生成/删除对接自家系统的 API Key。
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS distributor_api_keys (
+    id             SERIAL PRIMARY KEY,
+    distributor_id INT          NOT NULL,
+    name           VARCHAR(100),
+    api_key        VARCHAR(128) NOT NULL UNIQUE,
+    status         INT          DEFAULT 1,             -- 1=启用 0=禁用
+    last_used_at   TIMESTAMP,
+    created_at     TIMESTAMP    DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_dak_distributor_id ON distributor_api_keys(distributor_id);
+
+-- =============================================================================
+-- PART 8: 分站站点设置补列 (Week 10.3)
+--   distributor_sites 增加 SEO 字段 (前端站点设置页消费)。
+-- =============================================================================
+ALTER TABLE IF EXISTS distributor_sites ADD COLUMN IF NOT EXISTS seo_title       VARCHAR(200);
+ALTER TABLE IF EXISTS distributor_sites ADD COLUMN IF NOT EXISTS seo_keywords    VARCHAR(255);
+ALTER TABLE IF EXISTS distributor_sites ADD COLUMN IF NOT EXISTS seo_description TEXT;
+ALTER TABLE IF EXISTS distributor_sites ADD COLUMN IF NOT EXISTS balance         DECIMAL(12,2) DEFAULT 0;
+ALTER TABLE IF EXISTS distributor_sites ADD COLUMN IF NOT EXISTS total_revenue   DECIMAL(12,2) DEFAULT 0;
+
 COMMIT;

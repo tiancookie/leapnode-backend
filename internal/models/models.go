@@ -40,6 +40,63 @@ type DistributorSite struct {
 	Status            int       `gorm:"default:1" json:"status"`
 	ExpireAt          time.Time `json:"expire_at"`
 	CreatedAt         time.Time `json:"created_at"`
+
+	// --- Week 10.3 站点设置扩展列 (SEO + 财务累计) ---
+	SEOTitle       string  `gorm:"column:seo_title" json:"seo_title"`
+	SEOKeywords    string  `gorm:"column:seo_keywords" json:"seo_keywords"`
+	SEODescription string  `gorm:"column:seo_description" json:"seo_description"`
+	Balance        float64 `gorm:"column:balance" json:"balance"`             // 可提现余额（美元）
+	TotalRevenue   float64 `gorm:"column:total_revenue" json:"total_revenue"` // 累计收益（美元）
+}
+
+// DistributorPaymentConfig 分站支付配置 -> distributor_payment_configs
+//
+// payment_type: usdt / alipay / stripe
+// config JSONB 存放各渠道账号信息, 以字符串形式读写 (前端直接消费 JSON)。
+type DistributorPaymentConfig struct {
+	ID            uint      `gorm:"primaryKey" json:"id"`
+	DistributorID int       `gorm:"column:distributor_id" json:"distributor_id"`
+	PaymentType   string    `gorm:"column:payment_type" json:"payment_type"`
+	Enabled       bool      `gorm:"column:enabled" json:"enabled"`
+	Config        string    `gorm:"column:config;type:jsonb" json:"config"`
+	CreatedAt     time.Time `gorm:"column:created_at" json:"created_at"`
+	UpdatedAt     time.Time `gorm:"column:updated_at" json:"updated_at"`
+}
+
+func (DistributorPaymentConfig) TableName() string {
+	return "distributor_payment_configs"
+}
+
+// DistributorAPIKey 分站 API 密钥 -> distributor_api_keys
+type DistributorAPIKey struct {
+	ID            uint       `gorm:"primaryKey" json:"id"`
+	DistributorID int        `gorm:"column:distributor_id" json:"distributor_id"`
+	Name          string     `gorm:"column:name" json:"name"`
+	APIKey        string     `gorm:"column:api_key" json:"api_key"`
+	Status        int        `gorm:"column:status;default:1" json:"status"`
+	LastUsedAt    *time.Time `gorm:"column:last_used_at" json:"last_used_at,omitempty"`
+	CreatedAt     time.Time  `gorm:"column:created_at" json:"created_at"`
+}
+
+func (DistributorAPIKey) TableName() string {
+	return "distributor_api_keys"
+}
+
+// SharedSubscriptionProduct 订阅共享商品 -> shared_subscription_products
+type SharedSubscriptionProduct struct {
+	ID         uint      `gorm:"primaryKey" json:"id"`
+	MerchantID int       `gorm:"column:merchant_id" json:"merchant_id"`
+	Name       string    `gorm:"column:name" json:"name"`
+	Provider   string    `gorm:"column:provider" json:"provider"`
+	Plan       string    `gorm:"column:plan" json:"plan"`
+	PriceRatio float64   `gorm:"column:price_ratio" json:"price_ratio"`
+	ModelCount int       `gorm:"column:model_count" json:"model_count"`
+	Status     int       `gorm:"column:status;default:1" json:"status"`
+	CreatedAt  time.Time `gorm:"column:created_at" json:"created_at"`
+}
+
+func (SharedSubscriptionProduct) TableName() string {
+	return "shared_subscription_products"
 }
 
 // Package 套餐 -> packages

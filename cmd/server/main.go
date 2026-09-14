@@ -99,6 +99,9 @@ func main() {
 	merchantService := services.NewMerchantService(db)
 	merchantController := controllers.NewMerchantController(merchantService)
 
+	distributorService := services.NewDistributorService(db)
+	distributorController := controllers.NewDistributorController(distributorService)
+
 	dist := router.Group("/api/dist")
 	{
 		siteGroup := dist.Group("/site")
@@ -157,6 +160,14 @@ func main() {
 	merchant.Use(middleware.MerchantAuth())
 	{
 		merchantController.RegisterRoutes(merchant)
+	}
+
+	// 分站管理: /api/distributor/* (需要 AuthRequired + DistributorAuth)
+	distributor := router.Group("/api/distributor")
+	distributor.Use(middleware.AuthRequired(db))
+	distributor.Use(middleware.DistributorAuth())
+	{
+		distributorController.RegisterRoutes(distributor)
 	}
 
 	srv := &http.Server{
