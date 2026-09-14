@@ -90,6 +90,9 @@ func main() {
 	topupService := services.NewTopupService(db)
 	topupController := controllers.NewTopupController(topupService)
 
+	affService := services.NewAffService(db)
+	affController := controllers.NewAffController(affService)
+
 	dist := router.Group("/api/dist")
 	{
 		siteGroup := dist.Group("/site")
@@ -118,6 +121,20 @@ func main() {
 		topupProtected := dist.Group("/topup")
 		topupProtected.Use(middleware.AuthRequired(db))
 		topupController.RegisterProtectedRoutes(topupProtected)
+
+		// 返佣系统: 受保护路由 (aff/kol)
+		affProtected := dist.Group("")
+		affProtected.Use(middleware.AuthRequired(db))
+		{
+			affProtected.GET("/aff", affController.GetAffCode)
+			affProtected.GET("/aff_earnings", affController.GetAffEarnings)
+			affProtected.POST("/aff_transfer", affController.TransferAffQuota)
+			affProtected.POST("/aff_withdraw", affController.RequestWithdraw)
+			affProtected.GET("/aff_payouts", affController.GetAffPayouts)
+			affProtected.GET("/aff/invitees", affController.GetInvitees)
+			affProtected.POST("/kol_apply", affController.ApplyKOL)
+			affProtected.GET("/kol_status", affController.GetKOLStatus)
+		}
 	}
 
 	srv := &http.Server{

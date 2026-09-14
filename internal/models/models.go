@@ -299,3 +299,69 @@ type CryptoTopupOrder struct {
 func (CryptoTopupOrder) TableName() string {
 	return "crypto_topup_orders"
 }
+
+// AffHistory 返佣记录表 -> affiliate_earnings
+type AffHistory struct {
+	ID             int64     `gorm:"primaryKey;column:id" json:"id"`
+	UserID         int       `gorm:"column:user_id" json:"user_id"`         // 邀请人
+	InviteeID      int       `gorm:"column:invitee_id" json:"invitee_id"`   // 被邀请人
+	OrderID        string    `gorm:"column:order_id" json:"order_id"`       // 关联订单号
+	Quota          int64     `gorm:"column:quota" json:"quota"`             // 收益金额 (Quota单位)
+	CommissionRate float64   `gorm:"column:commission_rate" json:"commission_rate"`
+	EventType      string    `gorm:"column:event_type" json:"event_type"`   // register/first_topup/consumption/transfer
+	Status         int       `gorm:"column:status;default:1" json:"status"` // 0=pending 1=completed 2=rejected
+	CreatedAt      time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+}
+
+func (AffHistory) TableName() string {
+	return "affiliate_earnings"
+}
+
+// ReferralConfig 邀请奖励配置表 -> referral_config
+type ReferralConfig struct {
+	ID               int       `gorm:"primaryKey;column:id" json:"id"`
+	RewardType       string    `gorm:"column:reward_type" json:"reward_type"` // register/first_topup/consumption_rate/level2_rate
+	RewardAmount     float64   `gorm:"column:reward_amount" json:"reward_amount"`
+	IsPlatformFunded bool      `gorm:"column:is_platform_funded" json:"is_platform_funded"`
+	Enabled          bool      `gorm:"column:enabled" json:"enabled"`
+	CreatedAt        time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+}
+
+func (ReferralConfig) TableName() string {
+	return "referral_config"
+}
+
+// KolApplication 商家/分站申请表 -> user_applications
+type KolApplication struct {
+	ID            int       `gorm:"primaryKey;column:id" json:"id"`
+	UserID        int       `gorm:"column:user_id" json:"user_id"`
+	ApplyType     string    `gorm:"column:apply_type" json:"apply_type"` // merchant/distributor
+	CompanyName   string    `gorm:"column:company_name" json:"company_name"`
+	ContactInfo   string    `gorm:"column:contact_info" json:"contact_info"`
+	DepositAmount float64   `gorm:"column:deposit_amount" json:"deposit_amount"`
+	Status        int       `gorm:"column:status;default:0" json:"status"` // 0=pending 1=approved 2=rejected
+	AdminRemark   string    `gorm:"column:admin_remark" json:"admin_remark"`
+	AppliedAt     time.Time `gorm:"column:applied_at;autoCreateTime" json:"applied_at"`
+	ProcessedAt   *time.Time `gorm:"column:processed_at" json:"processed_at,omitempty"`
+}
+
+func (KolApplication) TableName() string {
+	return "user_applications"
+}
+
+// WithdrawalRequest 提现申请表 -> affiliate_payouts
+type WithdrawalRequest struct {
+	ID            int64      `gorm:"primaryKey;column:id" json:"id"`
+	UserID        int        `gorm:"column:user_id" json:"user_id"`
+	Amount        float64    `gorm:"column:amount" json:"amount"` // 美元金额
+	PaymentMethod string     `gorm:"column:payment_method" json:"payment_method"`
+	AccountInfo   string     `gorm:"column:account_info" json:"account_info"`
+	Status        int        `gorm:"column:status;default:0" json:"status"` // 0=pending 1=approved 2=rejected 3=paid
+	AdminRemark   string     `gorm:"column:admin_remark" json:"admin_remark"`
+	ProcessedAt   *time.Time `gorm:"column:processed_at" json:"processed_at,omitempty"`
+	CreatedAt     time.Time  `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+}
+
+func (WithdrawalRequest) TableName() string {
+	return "affiliate_payouts"
+}
