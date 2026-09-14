@@ -87,6 +87,9 @@ func main() {
 	tokenService := services.NewTokenService(db)
 	tokenController := controllers.NewTokenController(tokenService, siteService)
 
+	topupService := services.NewTopupService(db)
+	topupController := controllers.NewTopupController(topupService)
+
 	dist := router.Group("/api/dist")
 	{
 		siteGroup := dist.Group("/site")
@@ -107,6 +110,14 @@ func main() {
 		tokenProtected := dist.Group("/token")
 		tokenProtected.Use(middleware.AuthRequired(db))
 		tokenController.RegisterProtectedRoutes(tokenProtected)
+
+		// 充值管理: 公开路由 (info) + 受保护路由 (redeem/history)
+		topupGroup := dist.Group("/topup")
+		topupController.RegisterPublicRoutes(topupGroup)
+
+		topupProtected := dist.Group("/topup")
+		topupProtected.Use(middleware.AuthRequired(db))
+		topupController.RegisterProtectedRoutes(topupProtected)
 	}
 
 	srv := &http.Server{

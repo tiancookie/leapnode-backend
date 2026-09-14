@@ -221,3 +221,46 @@ type Token struct {
 func (Token) TableName() string {
 	return "tokens"
 }
+
+// Redemption New-API 原生兑换码表 -> redemptions
+//
+// 字段命名严格对齐 New-API 的 redemptions 表列 (~/Downloads/new-api_code/.../model/redemption.go),
+// 以保证与 New-API AutoMigrate 建出的表 100% 兼容。
+//
+// 注意: redemptions 表由 New-API AutoMigrate 建立, 已存在。LeapNode 只做兑换 CRUD,
+// 绝不 AutoMigrate 或改列。此处仅复用其原生列。
+// Status 语义: 1=未使用(enabled) 2=已禁用(disabled) 3=已使用(used)
+type Redemption struct {
+	Id           int            `json:"id" gorm:"primaryKey;column:id"`
+	UserId       int            `json:"user_id" gorm:"column:user_id"`
+	Key          string         `json:"key" gorm:"column:key;type:char(32);uniqueIndex"`
+	Status       int            `json:"status" gorm:"column:status;default:1"`
+	Name         string         `json:"name" gorm:"column:name;index"`
+	Quota        int            `json:"quota" gorm:"column:quota;default:100"`
+	CreatedTime  int64          `json:"created_time" gorm:"column:created_time;bigint"`
+	RedeemedTime int64          `json:"redeemed_time" gorm:"column:redeemed_time;bigint"`
+	UsedUserId   int            `json:"used_user_id" gorm:"column:used_user_id"`
+	DeletedAt    gorm.DeletedAt `json:"-" gorm:"index"`
+	ExpiredTime  int64          `json:"expired_time" gorm:"column:expired_time;bigint"` // 0 表示不过期
+}
+
+func (Redemption) TableName() string {
+	return "redemptions"
+}
+
+// TopupOrder 充值订单表 -> topup_orders
+type TopupOrder struct {
+	ID            string  `gorm:"primaryKey;column:id" json:"id"`
+	UserID        int     `gorm:"column:user_id" json:"user_id"`
+	Amount        float64 `gorm:"column:amount" json:"amount"`
+	Quota         int64   `gorm:"column:quota" json:"quota"`
+	PaymentMethod string  `gorm:"column:payment_method" json:"payment_method"`
+	TradeNo       string  `gorm:"column:trade_no" json:"trade_no"`
+	Status        int     `gorm:"column:status;default:0" json:"status"` // 0=待支付 1=已支付 2=失败
+	PaidAt        *int64  `gorm:"column:paid_at" json:"paid_at,omitempty"`
+	CreatedAt     int64   `gorm:"column:created_at;autoCreateTime:milli" json:"created_at"`
+}
+
+func (TopupOrder) TableName() string {
+	return "topup_orders"
+}
