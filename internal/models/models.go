@@ -4,7 +4,11 @@
 // 此处先定义核心模型骨架, 后续按模块补全字段与关联关系。
 package models
 
-import "time"
+import (
+	"time"
+
+	"gorm.io/gorm"
+)
 
 // Merchant 商家 (KOL / 渠道供应商) -> merchants
 type Merchant struct {
@@ -185,4 +189,35 @@ type Channel struct {
 
 func (Channel) TableName() string {
 	return "channels"
+}
+
+// Token New-API 原生令牌表 -> tokens
+//
+// 字段命名严格对齐 New-API 的 tokens 表列 (~/Downloads/new-api_code/.../model/token.go),
+// 以保证与 New-API AutoMigrate 建出的表 100% 兼容 (不新增/不改动 New-API 已有列)。
+//
+// 注意: tokens 表由 New-API AutoMigrate 建立, 已存在。LeapNode 只做 CRUD,
+// 绝不 AutoMigrate 或改列。此处仅复用其原生列 (AutoGroups 前端不消费, 故不映射)。
+type Token struct {
+	Id                 int            `json:"id" gorm:"primaryKey;column:id"`
+	UserId             int            `json:"user_id" gorm:"column:user_id;index"`
+	Key                string         `json:"key" gorm:"column:key;type:varchar(128);uniqueIndex"`
+	Status             int            `json:"status" gorm:"column:status;default:1"`
+	Name               string         `json:"name" gorm:"column:name;index"`
+	CreatedTime        int64          `json:"created_time" gorm:"column:created_time;bigint"`
+	AccessedTime       int64          `json:"accessed_time" gorm:"column:accessed_time;bigint"`
+	ExpiredTime        int64          `json:"expired_time" gorm:"column:expired_time;bigint;default:-1"` // -1 表永不过期
+	RemainQuota        int            `json:"remain_quota" gorm:"column:remain_quota;default:0"`
+	UnlimitedQuota     bool           `json:"unlimited_quota" gorm:"column:unlimited_quota"`
+	ModelLimitsEnabled bool           `json:"model_limits_enabled" gorm:"column:model_limits_enabled"`
+	ModelLimits        string         `json:"model_limits" gorm:"column:model_limits;type:text"`
+	AllowIps           *string        `json:"allow_ips" gorm:"column:allow_ips;default:''"`
+	UsedQuota          int            `json:"used_quota" gorm:"column:used_quota;default:0"`
+	Group              string         `json:"group" gorm:"column:group;default:''"`
+	CrossGroupRetry    bool           `json:"cross_group_retry" gorm:"column:cross_group_retry"`
+	DeletedAt          gorm.DeletedAt `json:"-" gorm:"index"` // 软删除 (New-API 原生列)
+}
+
+func (Token) TableName() string {
+	return "tokens"
 }

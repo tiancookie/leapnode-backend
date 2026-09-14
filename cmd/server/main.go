@@ -84,6 +84,9 @@ func main() {
 	userService := services.NewUserService(db)
 	userController := controllers.NewUserController(userService)
 
+	tokenService := services.NewTokenService(db)
+	tokenController := controllers.NewTokenController(tokenService, siteService)
+
 	dist := router.Group("/api/dist")
 	{
 		siteGroup := dist.Group("/site")
@@ -98,6 +101,12 @@ func main() {
 		userProtected := dist.Group("/user")
 		userProtected.Use(middleware.AuthRequired(db))
 		userController.RegisterProtectedRoutes(userProtected)
+
+		// 令牌管理: 受保护路由 (list/create/update/delete/models)
+		// 全部走 AuthRequired, 服务层强制 WHERE user_id = 当前用户 防越权。
+		tokenProtected := dist.Group("/token")
+		tokenProtected.Use(middleware.AuthRequired(db))
+		tokenController.RegisterProtectedRoutes(tokenProtected)
 	}
 
 	srv := &http.Server{
