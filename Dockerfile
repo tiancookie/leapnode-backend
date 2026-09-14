@@ -3,8 +3,8 @@ FROM golang:1.21-alpine AS builder
 
 WORKDIR /app
 
-# 复制 go.mod（go.sum 会自动生成）
-COPY go.mod ./
+# 复制 go.mod 和 go.sum
+COPY go.mod go.sum ./
 RUN go mod download
 
 # 复制源代码
