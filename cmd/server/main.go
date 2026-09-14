@@ -13,6 +13,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
+	"github.com/tiancookie/leapnode-backend/internal/controllers"
+	"github.com/tiancookie/leapnode-backend/internal/services"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
@@ -75,11 +77,13 @@ func main() {
 	})
 
 	// /api/dist/* 契约需与 SubRouter 前端 100% 兼容, 在 internal/controllers 中逐步实现
+	siteService := services.NewSiteService(db)
+	siteController := controllers.NewSiteController(siteService)
+
 	dist := router.Group("/api/dist")
 	{
-		dist.GET("/site/info", func(c *gin.Context) {
-			c.JSON(http.StatusOK, gin.H{"message": "not implemented"})
-		})
+		siteGroup := dist.Group("/site")
+		siteController.RegisterRoutes(siteGroup)
 	}
 
 	srv := &http.Server{
