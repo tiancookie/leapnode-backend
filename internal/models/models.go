@@ -136,7 +136,7 @@ type User struct {
 	AffCode         string `gorm:"column:aff_code" json:"aff_code"`
 	AffCount        int    `gorm:"column:aff_count" json:"aff_count"`
 	AffQuota        int64  `gorm:"column:aff_quota" json:"aff_quota"`
-	AffHistoryQuota int64  `gorm:"column:aff_history_quota" json:"aff_history_quota"`
+	AffHistoryQuota int64  `gorm:"column:aff_history" json:"aff_history_quota"`
 	InviterID       int    `gorm:"column:inviter_id" json:"inviter_id"`
 	CreatedTime     int64  `gorm:"column:created_time" json:"created_time"` // Unix 秒
 
