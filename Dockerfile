@@ -10,6 +10,9 @@ RUN go mod tidy && go mod download
 # 复制源代码
 COPY . .
 
+# 编译前再次确保依赖一致
+RUN go mod tidy
+
 # 编译
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o leapnode ./cmd/server
 
