@@ -377,4 +377,17 @@ VALUES
     ('first_topup',  1.00, TRUE, TRUE)
 ON CONFLICT DO NOTHING;
 
+-- =============================================================================
+-- PART 4: key_groups 补列 (前端 Tokens.jsx 消费字段, 幂等)
+--   原始建表仅含 discount_ratio/leo_threshold; 以下为展示层所需的扩展列
+-- =============================================================================
+ALTER TABLE IF EXISTS key_groups ADD COLUMN IF NOT EXISTS vendor_category VARCHAR(50);
+ALTER TABLE IF EXISTS key_groups ADD COLUMN IF NOT EXISTS price_discount  DECIMAL(6,4);
+ALTER TABLE IF EXISTS key_groups ADD COLUMN IF NOT EXISTS rmb_per_usd     DECIMAL(10,4);
+ALTER TABLE IF EXISTS key_groups ADD COLUMN IF NOT EXISTS discount_label  VARCHAR(100);
+ALTER TABLE IF EXISTS key_groups ADD COLUMN IF NOT EXISTS description     TEXT;
+ALTER TABLE IF EXISTS key_groups ADD COLUMN IF NOT EXISTS tags            VARCHAR(255);
+ALTER TABLE IF EXISTS key_groups ADD COLUMN IF NOT EXISTS is_recommended  BOOLEAN DEFAULT FALSE;
+ALTER TABLE IF EXISTS key_groups ADD COLUMN IF NOT EXISTS is_unavailable  BOOLEAN DEFAULT FALSE;
+
 COMMIT;
