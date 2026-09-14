@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log"
 	"net/http"
@@ -48,6 +49,13 @@ func main() {
 		log.Fatalf("failed to ping postgres: %v", err)
 	}
 	log.Println("postgres connected")
+
+	// --- Auto Migration: 执行 DDL ---
+	if err := runMigrations(sqlDB); err != nil {
+		log.Printf("warning: migration failed (may already exist): %v", err)
+	} else {
+		log.Println("migrations completed")
+	}
 
 	// --- Redis ---
 	rdb := redis.NewClient(&redis.Options{Addr: redisAddr})
@@ -107,4 +115,19 @@ func getenv(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// runMigrations 执行数据库迁移
+func runMigrations(db *sql.DB) error {
+	sqlBytes, err := os.ReadFile("migrations/001_initial_schema.sql")
+	if err != nil {
+		return fmt.Errorf("read migration file: %w", err)
+	}
+	
+	_, err = db.Exec(string(sqlBytes))
+	if err != nil {
+		return fmt.Errorf("execute migration: %w", err)
+	}
+	
+	return nil
 }
