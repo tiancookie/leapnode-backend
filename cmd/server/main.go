@@ -93,6 +93,9 @@ func main() {
 	affService := services.NewAffService(db)
 	affController := controllers.NewAffController(affService)
 
+	adminService := services.NewAdminService(db)
+	adminController := controllers.NewAdminController(adminService)
+
 	dist := router.Group("/api/dist")
 	{
 		siteGroup := dist.Group("/site")
@@ -135,6 +138,14 @@ func main() {
 			affProtected.POST("/kol_apply", affController.ApplyKOL)
 			affProtected.GET("/kol_status", affController.GetKOLStatus)
 		}
+	}
+
+	// 管理员后台: /api/admin/* (需要 AuthRequired + AdminAuth)
+	admin := router.Group("/api/admin")
+	admin.Use(middleware.AuthRequired(db))
+	admin.Use(middleware.AdminAuth())
+	{
+		adminController.RegisterRoutes(admin)
 	}
 
 	srv := &http.Server{
