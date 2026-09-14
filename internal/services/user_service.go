@@ -2,7 +2,9 @@
 package services
 
 import (
+	"crypto/rand"
 	"errors"
+	"math/big"
 	"regexp"
 	"strings"
 	"time"
@@ -154,6 +156,13 @@ func (s *UserService) Register(in RegisterInput) (*models.User, error) {
 	// 需查邀请人并写 inviter_id + 发放注册奖励 (referral_config)。
 	// 涉及资金池结算, 留待返佣模块统一实现。当前仅忽略。
 
+	// aff_code 列有 uniqueIndex, 每个用户必须有唯一邀请码 (New-API 语义)。
+	// 空串会在第 2 个用户注册时撞唯一约束, 故此处生成唯一随机码。
+	affCode, err := s.generateUniqueAffCode()
+	if err != nil {
+		return nil, err
+	}
+
 	user := models.User{
 		Username:     username,
 		Password:     string(hash),
@@ -162,6 +171,7 @@ func (s *UserService) Register(in RegisterInput) (*models.User, error) {
 		Role:         1, // New-API: 1=普通用户
 		Status:       1, // 1=正常
 		Quota:        0,
+		AffCode:      affCode,
 		Group:        "default",
 		UserLevel:    0,
 		CreatedTime:  time.Now().Unix(),
@@ -237,4 +247,32 @@ func (s *UserService) UpdateLanguage(userID int, language string) error {
 // ToResponse 暴露给 controller 的转换函数。
 func (s *UserService) ToResponse(u *models.User) *UserResponse {
 	return toResponse(u)
+}
+
+// affCodeChars 邀请码字符集 (数字+大小写字母)。
+const affCodeChars = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+// generateUniqueAffCode 生成一个在 users 表中唯一的 8 位邀请码。
+// aff_code 列有 uniqueIndex, 必须保证不冲突。
+func (s *UserService) generateUniqueAffCode() (string, error) {
+	maxI := big.NewInt(int64(len(affCodeChars)))
+	for attempt := 0; attempt < 8; attempt++ {
+		b := make([]byte, 8)
+		for i := range b {
+			n, err := rand.Int(rand.Reader, maxI)
+			if err != nil {
+				return "", err
+			}
+			b[i] = affCodeChars[n.Int64()]
+		}
+		code := string(b)
+		var count int64
+		if err := s.db.Model(&models.User{}).Where("aff_code = ?", code).Count(&count).Error; err != nil {
+			return "", err
+		}
+		if count == 0 {
+			return code, nil
+		}
+	}
+	return "", errors.New("failed to generate unique aff_code")
 }
