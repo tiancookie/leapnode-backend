@@ -132,33 +132,94 @@ func (c *NewAPIClient) getUserIDByUsername(username string) (int, error) {
 	return 0, fmt.Errorf("user %s not found after creation", username)
 }
 
-// IncreaseQuota 增加用户 quota（调用 New-API 的 PUT /api/user/:id 接口）。
+// manageUserRequest New-API POST /api/user/manage 的请求体。
+// 对齐 New-API controller/user.go ManageRequest{Id,Action,Value,Mode}。
+type manageUserRequest struct {
+	Id     int    `json:"id"`
+	Action string `json:"action"` // add_quota / disable / enable / delete / promote / demote
+	Value  int    `json:"value"`  // add_quota 时的额度值
+	Mode   string `json:"mode"`   // add / subtract (add_quota 时)
+}
+
+// IncreaseQuota 增加用户 quota（调用 New-API POST /api/user/manage, action=add_quota mode=add）。
 func (c *NewAPIClient) IncreaseQuota(userID int, delta int) error {
-	// 1. 先获取当前用户信息
+	return c.manageUser(manageUserRequest{
+		Id:     userID,
+		Action: "add_quota",
+		Mode:   "add",
+		Value:  delta,
+	})
+}
+
+// DecreaseQuota 扣减用户 quota（action=add_quota mode=subtract）。
+func (c *NewAPIClient) DecreaseQuota(userID int, delta int) error {
+	return c.manageUser(manageUserRequest{
+		Id:     userID,
+		Action: "add_quota",
+		Mode:   "subtract",
+		Value:  delta,
+	})
+}
+
+// SetUserQuota 设置用户 quota 为指定值（先查当前值算差额，再 add/subtract）。
+func (c *NewAPIClient) SetUserQuota(userID int, quota int) error {
 	user, err := c.getUser(userID)
 	if err != nil {
 		return fmt.Errorf("failed to get user: %w", err)
 	}
-
-	// 2. 计算新 quota
-	newQuota := user.Quota + delta
-
-	// 3. 调用更新接口
-	return c.updateUser(userID, map[string]interface{}{
-		"quota": newQuota,
-	})
+	delta := quota - user.Quota
+	if delta == 0 {
+		return nil
+	}
+	if delta > 0 {
+		return c.IncreaseQuota(userID, delta)
+	}
+	return c.DecreaseQuota(userID, -delta)
 }
 
-// SetUserQuota 设置用户 quota 为指定值。
-func (c *NewAPIClient) SetUserQuota(userID int, quota int) error {
-	return c.updateUser(userID, map[string]interface{}{
-		"quota": quota,
-	})
+// manageUser 调用 POST /api/user/manage（需 AdminAuth）。
+func (c *NewAPIClient) manageUser(req manageUserRequest) error {
+	url := fmt.Sprintf("%s/api/user/manage", c.baseURL)
+	body, err := json.Marshal(req)
+	if err != nil {
+		return err
+	}
+
+	httpReq, err := http.NewRequest("POST", url, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	httpReq.Header.Set("Authorization", "Bearer "+c.adminToken)
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return fmt.Errorf("http request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("New-API returned status %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var result struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return fmt.Errorf("failed to decode response: %w", err)
+	}
+	if !result.Success {
+		return fmt.Errorf("New-API manage user error: %s", result.Message)
+	}
+	return nil
 }
 
-// UpdateUserPassword 更新用户密码（调用 New-API 的 PUT /api/user/:id 接口）。
+// UpdateUserPassword 更新用户密码（调用 New-API PUT /api/user/, body 带 id+password）。
 func (c *NewAPIClient) UpdateUserPassword(userID int, newPassword string) error {
 	return c.updateUser(userID, map[string]interface{}{
+		"id":       userID,
 		"password": newPassword,
 	})
 }
@@ -205,9 +266,11 @@ func (c *NewAPIClient) getUser(userID int) (*userInfo, error) {
 	return result.Data, nil
 }
 
-// updateUser 更新用户信息（调用 PUT /api/user/:id）。
+// updateUser 更新用户信息（调用 PUT /api/user/, body 带 id，需 AdminAuth）。
 func (c *NewAPIClient) updateUser(userID int, updates map[string]interface{}) error {
-	url := fmt.Sprintf("%s/api/user/%d", c.baseURL, userID)
+	url := fmt.Sprintf("%s/api/user/", c.baseURL)
+	// 确保 body 里带 id（New-API UpdateUser 从 body 读 id，不是 URL）
+	updates["id"] = userID
 	body, err := json.Marshal(updates)
 	if err != nil {
 		return err
