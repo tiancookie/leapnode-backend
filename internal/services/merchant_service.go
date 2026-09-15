@@ -273,7 +273,7 @@ func (s *MerchantService) CreateChannel(userID int, channelType int, key, name, 
 		MerchantID:  &merchantID,
 		InputPrice:  &inputPrice,
 		OutputPrice: &outputPrice,
-		CreatedAt:   time.Now(),
+		CreatedTime: time.Now().Unix(),
 	}
 
 	// TODO(批channel专项): 改为 s.newAPIClient.CreateChannel(...) 走 New-API,

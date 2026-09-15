@@ -556,14 +556,14 @@ type CreateChannelInput struct {
 // CreateOfficialChannel 创建总站官方渠道。
 func (s *AdminService) CreateOfficialChannel(input CreateChannelInput) error {
 	channel := models.Channel{
-		Type:       input.Type,
-		Key:        input.Key,
-		Name:       input.Name,
-		Models:     input.Models,
-		Status:     input.Status,
-		Group:      input.Group,
-		MerchantID: nil, // 总站官方渠道
-		CreatedAt:  time.Now(),
+		Type:        input.Type,
+		Key:         input.Key,
+		Name:        input.Name,
+		Models:      input.Models,
+		Status:      input.Status,
+		Group:       input.Group,
+		MerchantID:  nil, // 总站官方渠道
+		CreatedTime: time.Now().Unix(),
 	}
 
 	return s.db.Create(&channel).Error

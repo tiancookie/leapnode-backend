@@ -238,10 +238,12 @@ type Channel struct {
 	Name        string    `gorm:"column:name" json:"name"`
 	Group       string    `gorm:"column:group" json:"group"`
 	Models      string    `gorm:"column:models" json:"models"`
-	MerchantID  *int      `gorm:"column:merchant_id" json:"merchant_id"`
-	InputPrice  *float64  `gorm:"column:input_price" json:"input_price"`
-	OutputPrice *float64  `gorm:"column:output_price" json:"output_price"`
-	CreatedAt   time.Time `gorm:"column:created_time" json:"created_at"`
+	MerchantID  *int     `gorm:"column:merchant_id" json:"merchant_id"`
+	InputPrice  *float64 `gorm:"column:input_price" json:"input_price"`
+	OutputPrice *float64 `gorm:"column:output_price" json:"output_price"`
+	// New-API channels.created_time 是 bigint(Unix秒), 不是 timestamp。
+	// 用 time.Time 会触发 "cannot encode into int8" 编码错误。
+	CreatedTime int64 `gorm:"column:created_time" json:"created_time"`
 }
 
 func (Channel) TableName() string {
