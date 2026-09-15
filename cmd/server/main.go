@@ -199,6 +199,27 @@ func main() {
 		Handler: router,
 	}
 
+	// 临时：初始化分站（POST /bootstrap/init-dist?user_id=24）
+	router.POST("/bootstrap/init-dist", func(c *gin.Context) {
+		userID := c.Query("user_id")
+		if userID == "" {
+			c.JSON(400, gin.H{"error": "user_id required"})
+			return
+		}
+		var siteID int
+		err := sqlDB.QueryRow(`
+			INSERT INTO distributor_sites (site_name, site_domain, user_id, status, commission_rate)
+			VALUES ('批7测试站', 'b7test.leapnode.com', $1, 1, 30)
+			ON CONFLICT (user_id) DO UPDATE SET site_name='批7测试站'
+			RETURNING id
+		`, userID).Scan(&siteID)
+		if err != nil {
+			c.JSON(500, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(200, gin.H{"success": true, "site_id": siteID, "user_id": userID})
+	})
+
 	go func() {
 		log.Printf("leapnode-backend listening on %s", httpAddr)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
