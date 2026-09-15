@@ -105,6 +105,9 @@ func main() {
 	distributorService := services.NewDistributorService(db, newAPIClient)
 	distributorController := controllers.NewDistributorController(distributorService)
 
+	packageService := services.NewPackageService(db)
+	packageController := controllers.NewPackageController(packageService)
+
 	dist := router.Group("/api/dist")
 	{
 		siteGroup := dist.Group("/site")
@@ -147,6 +150,18 @@ func main() {
 			affProtected.POST("/kol_apply", affController.ApplyKOL)
 			affProtected.GET("/kol_status", affController.GetKOLStatus)
 		}
+
+		// 套餐管理: 公开路由 (site/packages) + 受保护路由 (subscribe/subscription/active)
+		packageController.RegisterPublicRoutes(siteGroup)
+
+		packageProtected := dist.Group("")
+		packageProtected.Use(middleware.AuthRequired(db))
+		packageController.RegisterProtectedRoutes(packageProtected)
+
+		// 套餐管理后台: 受保护路由 (admin/packages CRUD)
+		adminPackages := dist.Group("/admin")
+		adminPackages.Use(middleware.AuthRequired(db))
+		packageController.RegisterAdminRoutes(adminPackages)
 	}
 
 	// 管理员后台: /api/admin/* (需要 AuthRequired + AdminAuth)

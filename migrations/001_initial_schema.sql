@@ -154,6 +154,7 @@ CREATE TABLE IF NOT EXISTS packages (
     id             SERIAL PRIMARY KEY,
     distributor_id INT DEFAULT 0,                     -- 0=总站套餐
     name           VARCHAR(100),
+    description    TEXT,                              -- 套餐描述
     price          DECIMAL(10,2),
     original_price DECIMAL(10,2),
     quota_amount   BIGINT,                            -- Quota 体系 (500000=$1)
