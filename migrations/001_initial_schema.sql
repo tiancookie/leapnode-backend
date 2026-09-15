@@ -220,6 +220,9 @@ CREATE TABLE IF NOT EXISTS redeem_codes (
 CREATE INDEX IF NOT EXISTS idx_redeem_codes_distributor_id ON redeem_codes(distributor_id);
 CREATE INDEX IF NOT EXISTS idx_redeem_codes_status         ON redeem_codes(status);
 CREATE INDEX IF NOT EXISTS idx_redeem_codes_batch_name     ON redeem_codes(batch_name);
+-- 商家生成的兑换码（批7补列，模型 RedeemCode.MerchantID 消费）
+ALTER TABLE redeem_codes ADD COLUMN IF NOT EXISTS merchant_id INT;
+CREATE INDEX IF NOT EXISTS idx_redeem_codes_merchant_id    ON redeem_codes(merchant_id);
 
 -- -----------------------------------------------------------------------------
 -- 9.1 额度调整记录表 (分站运营必备)
