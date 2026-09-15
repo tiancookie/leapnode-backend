@@ -10,6 +10,16 @@ import (
 	"gorm.io/gorm"
 )
 
+// GetSiteIDByOwner 按站长 user.ID 查 distributor_sites.id（分站主键）。
+// 用于把 user.ID 映射到 distributor_id（外键指向 distributor_sites.id）。
+func (s *DistributorService) GetSiteIDByOwner(ownerID int) (int, error) {
+	var site models.DistributorSite
+	if err := s.db.Where("owner_id = ?", ownerID).First(&site).Error; err != nil {
+		return 0, err
+	}
+	return int(site.ID), nil
+}
+
 // DistributorService 实现分站管理后台业务逻辑。
 type DistributorService struct {
 	db           *gorm.DB

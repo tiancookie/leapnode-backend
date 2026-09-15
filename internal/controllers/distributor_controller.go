@@ -31,8 +31,14 @@ func (ctrl *DistributorController) getDistributorID(c *gin.Context) (int, bool) 
 	if !ok {
 		return 0, false
 	}
-	// 分站ID = user.ID (分站站长的用户ID)
-	return user.ID, true
+	// distributor_id = distributor_sites.id (不是 user.ID)。
+	// distributor_model_listings 等表的 distributor_id 外键指向 distributor_sites(id),
+	// 必须用站点主键而非站长 user.ID, 否则违反外键约束。
+	siteID, err := ctrl.distributorService.GetSiteIDByOwner(user.ID)
+	if err != nil {
+		return 0, false
+	}
+	return siteID, true
 }
 
 // RegisterRoutes 注册分站管理路由。
