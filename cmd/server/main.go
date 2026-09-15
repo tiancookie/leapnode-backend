@@ -206,11 +206,20 @@ func main() {
 			c.JSON(400, gin.H{"error": "user_id required"})
 			return
 		}
+		
+		// 先查询是否已存在
+		var existingSiteID int
+		err := sqlDB.QueryRow(`SELECT id FROM distributor_sites WHERE owner_id = $1`, userID).Scan(&existingSiteID)
+		if err == nil {
+			c.JSON(200, gin.H{"success": true, "site_id": existingSiteID, "user_id": userID, "message": "已存在"})
+			return
+		}
+		
+		// 不存在则创建
 		var siteID int
-		err := sqlDB.QueryRow(`
+		err = sqlDB.QueryRow(`
 			INSERT INTO distributor_sites (owner_id, slug, name, status, global_markup_ratio)
 			VALUES ($1, 'b7test', '批7测试站', 1, 30.00)
-			ON CONFLICT (owner_id) DO UPDATE SET name='批7测试站'
 			RETURNING id
 		`, userID).Scan(&siteID)
 		if err != nil {
