@@ -222,6 +222,23 @@ CREATE INDEX IF NOT EXISTS idx_redeem_codes_status         ON redeem_codes(statu
 CREATE INDEX IF NOT EXISTS idx_redeem_codes_batch_name     ON redeem_codes(batch_name);
 
 -- -----------------------------------------------------------------------------
+-- 9.1 额度调整记录表 (分站运营必备)
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS quota_records (
+    id             SERIAL PRIMARY KEY,
+    user_id        INT REFERENCES users(id),
+    distributor_id INT,                                -- 操作者 (分站站长 ID)
+    change_amount  BIGINT,                             -- 变化量（正数=增加，负数=减少）
+    before_quota   BIGINT,                             -- 操作前余额
+    after_quota    BIGINT,                             -- 操作后余额
+    reason         VARCHAR(200),                       -- 操作原因
+    created_at     TIMESTAMP DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_quota_records_user_id        ON quota_records(user_id);
+CREATE INDEX IF NOT EXISTS idx_quota_records_distributor_id ON quota_records(distributor_id);
+CREATE INDEX IF NOT EXISTS idx_quota_records_created_at     ON quota_records(created_at);
+
+-- -----------------------------------------------------------------------------
 -- 10. 返佣记录表
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS affiliate_earnings (

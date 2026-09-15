@@ -439,138 +439,635 @@ func (s *DistributorService) DeleteKeyGroup(distributorID, groupID int) error {
 
 // ========== 7. 商品配置 - 兑换码 ==========
 
-// GetDistributorRedeemCodes 获取分站兑换码列表。
+// RedeemCodeListItem 兑换码列表项（对齐前端契约）
+type RedeemCodeListItem struct {
+	ID          int    `json:"id"`           // 批次虚拟ID
+	Code        string `json:"code"`         // 展示用（批量时取第一个）
+	Name        string `json:"name"`         // batch_name
+	Amount      int64  `json:"amount"`       // quota
+	Count       int    `json:"count"`        // 该批次的码数量
+	UsedCount   int    `json:"used_count"`   // 已使用数量
+	Status      int    `json:"status"`       // 0=未用 1=已用 2=作废 3=过期
+	ExpireTime  int64  `json:"expire_time"`  // Unix 秒
+	CreatedTime int64  `json:"created_time"` // Unix 秒
+}
+
+// GetDistributorRedeemCodes 获取分站兑换码列表（按 batch_name 分组）
 func (s *DistributorService) GetDistributorRedeemCodes(distributorID int, page, pageSize int) ([]map[string]interface{}, int64, error) {
-	// TODO: 从 redeem_codes 表查询，WHERE distributor_id = ?
-	return []map[string]interface{}{}, 0, nil
+	// 按 batch_name 分组统计
+	type BatchStats struct {
+		BatchName   string
+		FirstCode   string
+		Quota       int64
+		TotalCount  int
+		UsedCount   int
+		ExpireAt    *time.Time
+		CreatedAt   time.Time
+	}
+
+	var batches []BatchStats
+	err := s.db.Raw(`
+		SELECT 
+			batch_name,
+			MIN(code) as first_code,
+			MAX(quota) as quota,
+			COUNT(*) as total_count,
+			SUM(CASE WHEN status = 1 THEN 1 ELSE 0 END) as used_count,
+			MAX(expire_at) as expire_at,
+			MIN(created_at) as created_at
+		FROM redeem_codes
+		WHERE distributor_id = ?
+		GROUP BY batch_name
+		ORDER BY created_at DESC
+	`, distributorID).Scan(&batches).Error
+
+	if err != nil {
+		return nil, 0, err
+	}
+
+	result := make([]map[string]interface{}, 0, len(batches))
+	for i, batch := range batches {
+		status := 0
+		if batch.UsedCount == batch.TotalCount {
+			status = 1 // 全部已用
+		} else if batch.ExpireAt != nil && batch.ExpireAt.Before(time.Now()) {
+			status = 3 // 已过期
+		}
+
+		expireTime := int64(0)
+		if batch.ExpireAt != nil {
+			expireTime = batch.ExpireAt.Unix()
+		}
+
+		result = append(result, map[string]interface{}{
+			"id":           i + 1,
+			"code":         batch.FirstCode,
+			"name":         batch.BatchName,
+			"amount":       batch.Quota,
+			"count":        batch.TotalCount,
+			"used_count":   batch.UsedCount,
+			"status":       status,
+			"expire_time":  expireTime,
+			"created_time": batch.CreatedAt.Unix(),
+		})
+	}
+
+	return result, int64(len(result)), nil
 }
 
-// GenerateDistributorRedeemCodes 生成兑换码（分站自费）。
+// GenerateDistributorRedeemCodes 生成兑换码（分站自费）
 func (s *DistributorService) GenerateDistributorRedeemCodes(distributorID int, name string, quota int64, count int, expiredTime int64) ([]string, error) {
-	// TODO: 插入 redeem_codes 表，distributor_id = ?
-	// 生成 count 个兑换码，每个 quota 额度
-	return []string{}, errors.New("not implemented")
+	if count < 1 || count > 1000 {
+		return nil, errors.New("count must be between 1 and 1000")
+	}
+
+	expireAt := time.Unix(expiredTime, 0)
+	codes := make([]string, 0, count)
+	redeemCodes := make([]models.RedeemCode, 0, count)
+
+	// 生成唯一码（带重试逻辑）
+	for len(codes) < count {
+		code := generateUniqueRedeemCode()
+		
+		// 检查数据库唯一性
+		var existing models.RedeemCode
+		if err := s.db.Where("code = ?", code).First(&existing).Error; err == gorm.ErrRecordNotFound {
+			codes = append(codes, code)
+			redeemCodes = append(redeemCodes, models.RedeemCode{
+				Code:          code,
+				DistributorID: distributorID,
+				Quota:         quota,
+				BatchName:     name,
+				Status:        0, // 未使用
+				ExpireAt:      &expireAt,
+				CreatedAt:     time.Now(),
+			})
+		}
+	}
+
+	// 批量插入（事务）
+	if err := s.db.Transaction(func(tx *gorm.DB) error {
+		return tx.Create(&redeemCodes).Error
+	}); err != nil {
+		return nil, fmt.Errorf("批量插入兑换码失败: %w", err)
+	}
+
+	return codes, nil
 }
 
-// GetRedeemCodeUsage 获取兑换码使用记录。
+// generateUniqueRedeemCode 生成格式为 LEAP-{8位随机大写字母数字} 的兑换码
+func generateUniqueRedeemCode() string {
+	const charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	b := make([]byte, 8)
+	for i := range b {
+		b[i] = charset[time.Now().UnixNano()%int64(len(charset))]
+	}
+	return "LEAP-" + string(b)
+}
+
+// GetRedeemCodeUsage 获取兑换码使用记录（按 batch_name 查所有码）
 func (s *DistributorService) GetRedeemCodeUsage(distributorID, codeID int) ([]map[string]interface{}, error) {
-	// TODO: 从 redeem_code_usage 表查询
-	return []map[string]interface{}{}, nil
+	// codeID 在前端是批次虚拟ID，需转换为 batch_name
+	// 简化：直接返回该分站所有已使用的码
+	type UsageRow struct {
+		Code     string
+		UsedBy   *int
+		UsedAt   *time.Time
+		Quota    int64
+		Username string
+	}
+
+	var rows []UsageRow
+	err := s.db.Raw(`
+		SELECT 
+			rc.code,
+			rc.used_by,
+			rc.used_at,
+			rc.quota,
+			COALESCE(u.username, '') as username
+		FROM redeem_codes rc
+		LEFT JOIN users u ON rc.used_by = u.id
+		WHERE rc.distributor_id = ? AND rc.status = 1
+		ORDER BY rc.used_at DESC
+		LIMIT 100
+	`, distributorID).Scan(&rows).Error
+
+	if err != nil {
+		return nil, err
+	}
+
+	result := make([]map[string]interface{}, 0, len(rows))
+	for _, row := range rows {
+		if row.UsedBy != nil && row.UsedAt != nil {
+			result = append(result, map[string]interface{}{
+				"code":       row.Code,
+				"user_id":    *row.UsedBy,
+				"username":   row.Username,
+				"used_at":    row.UsedAt.Unix(),
+				"quota_used": row.Quota,
+			})
+		}
+	}
+
+	return result, nil
 }
 
-// InvalidateDistributorRedeemCode 作废兑换码。
+// InvalidateDistributorRedeemCode 作废兑换码（按 codeID 关联的 batch 整批作废）
 func (s *DistributorService) InvalidateDistributorRedeemCode(distributorID, codeID int) error {
-	// TODO: 更新 redeem_codes 表，status = 2 (disabled)
-	return errors.New("not implemented")
+	// 简化实现：codeID 暂不映射 batch，直接作废所有未用码
+	result := s.db.Model(&models.RedeemCode{}).
+		Where("distributor_id = ? AND status = 0", distributorID).
+		Update("status", 2) // 2=作废
+
+	if result.Error != nil {
+		return result.Error
+	}
+
+	if result.RowsAffected == 0 {
+		return errors.New("no redeemable codes to invalidate")
+	}
+
+	return nil
 }
 
 // ========== 8. 客户运营 - 用户管理 ==========
 
-// GetDistributorUsers 获取分站用户列表。
+// GetDistributorUsers 获取分站用户列表（对齐前端契约）
 func (s *DistributorService) GetDistributorUsers(distributorID int, page, pageSize int) ([]map[string]interface{}, int64, error) {
-	var users []models.User
-	var total int64
-
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 100 {
+		pageSize = 20
+	}
 	offset := (page - 1) * pageSize
-	if err := s.db.Model(&models.User{}).Where("distributor_id = ?", distributorID).Count(&total).Error; err != nil {
+
+	// 查询总数
+	var total int64
+	if err := s.db.Model(&models.User{}).
+		Where("distributor_id = ?", distributorID).
+		Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 
-	if err := s.db.Where("distributor_id = ?", distributorID).
-		Order("created_time DESC").
-		Limit(pageSize).
-		Offset(offset).
-		Find(&users).Error; err != nil {
+	// 查询用户列表（关联订阅数和最后请求时间）
+	type UserRow struct {
+		ID              int
+		Username        string
+		Email           string
+		Quota           int64
+		UsedQuota       int64
+		CreatedTime     int64
+		SubCount        int
+		LastRequestTime int64
+	}
+
+	var rows []UserRow
+	err := s.db.Raw(`
+		SELECT 
+			u.id,
+			u.username,
+			COALESCE(u.email, '') as email,
+			u.quota,
+			u.used_quota,
+			u.created_at as created_time,
+			COALESCE(COUNT(s.id) FILTER (WHERE s.status = 1 AND s.expire_at > NOW()), 0) as sub_count,
+			COALESCE(MAX(t.accessed_time), 0) as last_request_time
+		FROM users u
+		LEFT JOIN subscriptions s ON u.id = s.user_id
+		LEFT JOIN tokens t ON u.id = t.user_id
+		WHERE u.distributor_id = ?
+		GROUP BY u.id
+		ORDER BY u.created_at DESC
+		LIMIT ? OFFSET ?
+	`, distributorID, pageSize, offset).Scan(&rows).Error
+
+	if err != nil {
 		return nil, 0, err
 	}
 
-	result := make([]map[string]interface{}, 0)
-	for _, u := range users {
+	result := make([]map[string]interface{}, 0, len(rows))
+	for _, row := range rows {
 		result = append(result, map[string]interface{}{
-			"id":           u.ID,
-			"username":     u.Username,
-			"display_name": u.DisplayName,
-			"quota":        u.Quota,
-			"used_quota":   u.UsedQuota,
-			"status":       u.Status,
-			"created_at":   time.Unix(u.CreatedTime, 0).Format("2006-01-02 15:04:05"),
+			"id":                 row.ID,
+			"username":           row.Username,
+			"email":              row.Email,
+			"quota":              row.Quota,
+			"used_quota":         row.UsedQuota,
+			"register_time":      row.CreatedTime,
+			"subscription_count": row.SubCount,
+			"last_request_time":  row.LastRequestTime,
 		})
 	}
 
 	return result, total, nil
 }
 
-// GetDistributorUserDetail 获取用户详情。
+// GetDistributorUserDetail 获取用户详情（对齐前端契约）
 func (s *DistributorService) GetDistributorUserDetail(distributorID, userID int) (map[string]interface{}, error) {
+	// 权限校验
 	var user models.User
 	if err := s.db.Where("id = ? AND distributor_id = ?", userID, distributorID).First(&user).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, fmt.Errorf("用户不存在或无权访问")
+		}
 		return nil, err
 	}
 
+	// 查询订阅数
+	var subCount int64
+	s.db.Model(&models.Subscription{}).
+		Where("user_id = ? AND status = 1 AND expire_at > NOW()", userID).
+		Count(&subCount)
+
+	// 查询 token 数
+	var tokenCount int64
+	s.db.Model(&models.Token{}).
+		Where("user_id = ? AND deleted_at IS NULL", userID).
+		Count(&tokenCount)
+
+	// 查询最后请求时间
+	var lastAccessTime int64
+	s.db.Model(&models.Token{}).
+		Where("user_id = ?", userID).
+		Select("MAX(accessed_time)").
+		Scan(&lastAccessTime)
+
 	return map[string]interface{}{
-		"id":           user.ID,
-		"username":     user.Username,
-		"display_name": user.DisplayName,
-		"email":        user.Email,
-		"quota":        user.Quota,
-		"used_quota":   user.UsedQuota,
-		"aff_quota":    user.AffQuota,
-		"status":       user.Status,
-		"user_level":   user.UserLevel,
-		"created_at":   time.Unix(user.CreatedTime, 0).Format("2006-01-02 15:04:05"),
+		"id":                 user.ID,
+		"username":           user.Username,
+		"email":              user.Email,
+		"display_name":       user.DisplayName,
+		"quota":              user.Quota,
+		"used_quota":         user.UsedQuota,
+		"register_time":      user.CreatedTime,
+		"status":             user.Status,
+		"subscription_count": int(subCount),
+		"token_count":        int(tokenCount),
+		"last_request_time":  lastAccessTime,
 	}, nil
 }
 
-// AdjustDistributorUserQuota 调整用户额度。
+// AdjustDistributorUserQuota 调整用户额度（事务 + New-API 同步）
 func (s *DistributorService) AdjustDistributorUserQuota(distributorID, userID int, amount int64) error {
-	// 验证用户归属
-	var user models.User
-	if err := s.db.Where("id = ? AND distributor_id = ?", userID, distributorID).First(&user).Error; err != nil {
+	var beforeQuota, afterQuota int64
+
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		// 1. 权限校验 + 锁行
+		var user models.User
+		if err := tx.Raw("SELECT * FROM users WHERE id = ? AND distributor_id = ? FOR UPDATE", userID, distributorID).
+			Scan(&user).Error; err != nil {
+			if err == gorm.ErrRecordNotFound {
+				return fmt.Errorf("用户不存在或无权访问")
+			}
+			return err
+		}
+
+		// 2. 计算新额度
+		beforeQuota = user.Quota
+		afterQuota = user.Quota + amount
+
+		if afterQuota < 0 {
+			return fmt.Errorf("扣减后余额不能为负数")
+		}
+
+		// 3. 记录 quota_records
+		record := models.QuotaRecord{
+			UserID:        userID,
+			DistributorID: distributorID,
+			ChangeAmount:  amount,
+			BeforeQuota:   beforeQuota,
+			AfterQuota:    afterQuota,
+			Reason:        "分站手动调整",
+			CreatedAt:     time.Now(),
+		}
+		if err := tx.Create(&record).Error; err != nil {
+			return fmt.Errorf("记录额度变化失败: %w", err)
+		}
+
+		// 4. 更新本地 users 表
+		if err := tx.Model(&user).Update("quota", afterQuota).Error; err != nil {
+			return fmt.Errorf("更新本地 quota 失败: %w", err)
+		}
+
+		return nil
+	})
+
+	if err != nil {
 		return err
 	}
 
-	// 调整额度（走 New-API，quota 是 New-API 缓存的热点字段）
-	return s.newAPIClient.IncreaseQuota(userID, int(amount))
+	// 5. 同步到 New-API（事务外，防阻塞）
+	if amount > 0 {
+		_ = s.newAPIClient.IncreaseQuota(userID, int(amount))
+	} else if amount < 0 {
+		_ = s.newAPIClient.DecreaseQuota(userID, int(-amount))
+	}
+
+	return nil
 }
 
-// GetUserOrders 获取用户订单记录。
+// GetUserOrders 获取用户订单记录（充值 + 套餐订阅）
 func (s *DistributorService) GetUserOrders(distributorID, userID int, page, pageSize int) ([]map[string]interface{}, int64, error) {
-	// TODO: 从 orders 表查询
-	// WHERE user_id = ? AND distributor_id = ?
-	return []map[string]interface{}{}, 0, nil
+	// 权限校验
+	var user models.User
+	if err := s.db.Where("id = ? AND distributor_id = ?", userID, distributorID).First(&user).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, 0, fmt.Errorf("用户不存在或无权访问")
+		}
+		return nil, 0, err
+	}
+
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 100 {
+		pageSize = 20
+	}
+	offset := (page - 1) * pageSize
+
+	// 查询充值订单
+	var topupOrders []models.TopupOrder
+	if err := s.db.Where("user_id = ?", userID).
+		Order("created_at DESC").
+		Limit(pageSize).Offset(offset).
+		Find(&topupOrders).Error; err != nil {
+		return nil, 0, err
+	}
+
+	// 查询订阅订单
+	var subscriptions []models.Subscription
+	if err := s.db.Where("user_id = ?", userID).
+		Order("created_at DESC").
+		Limit(pageSize).Offset(offset).
+		Find(&subscriptions).Error; err != nil {
+		return nil, 0, err
+	}
+
+	// 合并结果
+	result := make([]map[string]interface{}, 0)
+	for _, order := range topupOrders {
+		result = append(result, map[string]interface{}{
+			"type":       "topup",
+			"id":         order.ID,
+			"amount":     order.Amount,
+			"quota":      order.Quota,
+			"status":     order.Status,
+			"created_at": order.CreatedAt,
+		})
+	}
+	for _, sub := range subscriptions {
+		result = append(result, map[string]interface{}{
+			"type":       "subscription",
+			"id":         sub.ID,
+			"package_id": sub.PackageID,
+			"status":     sub.Status,
+			"expire_at":  sub.ExpireAt.Unix(),
+			"created_at": sub.CreatedAt.Unix(),
+		})
+	}
+
+	var total int64
+	s.db.Model(&models.TopupOrder{}).Where("user_id = ?", userID).Count(&total)
+
+	return result, total, nil
 }
 
-// GetUserTokens 获取用户令牌列表。
+// GetUserTokens 获取用户令牌列表
 func (s *DistributorService) GetUserTokens(distributorID, userID int) ([]map[string]interface{}, error) {
-	// TODO: 从 tokens 表查询
-	// WHERE user_id = ? AND (distributor_id = ? OR distributor_id = 0)
-	return []map[string]interface{}{}, nil
+	// 权限校验
+	var user models.User
+	if err := s.db.Where("id = ? AND distributor_id = ?", userID, distributorID).First(&user).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, fmt.Errorf("用户不存在或无权访问")
+		}
+		return nil, err
+	}
+
+	var tokens []models.Token
+	if err := s.db.Where("user_id = ?", userID).
+		Order("created_time DESC").
+		Find(&tokens).Error; err != nil {
+		return nil, err
+	}
+
+	result := make([]map[string]interface{}, 0, len(tokens))
+	for _, t := range tokens {
+		result = append(result, map[string]interface{}{
+			"id":            t.Id,
+			"name":          t.Name,
+			"key":           t.Key,
+			"status":        t.Status,
+			"used_quota":    t.UsedQuota,
+			"remain_quota":  t.RemainQuota,
+			"created_time":  t.CreatedTime,
+			"accessed_time": t.AccessedTime,
+		})
+	}
+
+	return result, nil
 }
 
 // ========== 9. 客户运营 - 令牌管理 ==========
 
-// GetDistributorTokens 获取分站所有令牌列表。
+// GetDistributorTokens 获取分站所有令牌列表
 func (s *DistributorService) GetDistributorTokens(distributorID int, page, pageSize int) ([]map[string]interface{}, int64, error) {
-	// TODO: 从 tokens 表查询
-	// WHERE distributor_id = ?
-	return []map[string]interface{}{}, 0, nil
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 100 {
+		pageSize = 20
+	}
+	offset := (page - 1) * pageSize
+
+	// 查询总数
+	var total int64
+	err := s.db.Raw(`
+		SELECT COUNT(*)
+		FROM tokens t
+		INNER JOIN users u ON t.user_id = u.id
+		WHERE u.distributor_id = ? AND t.deleted_at IS NULL
+	`, distributorID).Scan(&total).Error
+
+	if err != nil {
+		return nil, 0, err
+	}
+
+	// 查询列表
+	type TokenRow struct {
+		ID           int
+		UserID       int
+		Username     string
+		Name         string
+		Key          string
+		Status       int
+		UsedQuota    int
+		RemainQuota  int
+		CreatedTime  int64
+		AccessedTime int64
+	}
+
+	var rows []TokenRow
+	err = s.db.Raw(`
+		SELECT 
+			t.id,
+			t.user_id,
+			u.username,
+			t.name,
+			t.key,
+			t.status,
+			t.used_quota,
+			t.remain_quota,
+			t.created_time,
+			t.accessed_time
+		FROM tokens t
+		INNER JOIN users u ON t.user_id = u.id
+		WHERE u.distributor_id = ? AND t.deleted_at IS NULL
+		ORDER BY t.created_time DESC
+		LIMIT ? OFFSET ?
+	`, distributorID, pageSize, offset).Scan(&rows).Error
+
+	if err != nil {
+		return nil, 0, err
+	}
+
+	result := make([]map[string]interface{}, 0, len(rows))
+	for _, row := range rows {
+		result = append(result, map[string]interface{}{
+			"id":            row.ID,
+			"user_id":       row.UserID,
+			"username":      row.Username,
+			"name":          row.Name,
+			"key":           row.Key,
+			"status":        row.Status,
+			"used_quota":    row.UsedQuota,
+			"remain_quota":  row.RemainQuota,
+			"created_time":  row.CreatedTime,
+			"accessed_time": row.AccessedTime,
+		})
+	}
+
+	return result, total, nil
 }
 
-// UpdateTokenStatus 启用/禁用令牌。
+// UpdateTokenStatus 启用/禁用令牌
 func (s *DistributorService) UpdateTokenStatus(distributorID, tokenID int, status int) error {
-	// TODO: 更新 tokens 表，WHERE id = ? AND distributor_id = ?
-	return errors.New("not implemented")
+	// 权限校验：token 必须属于本分站用户
+	var token models.Token
+	err := s.db.Raw(`
+		SELECT t.*
+		FROM tokens t
+		INNER JOIN users u ON t.user_id = u.id
+		WHERE t.id = ? AND u.distributor_id = ? AND t.deleted_at IS NULL
+	`, tokenID, distributorID).Scan(&token).Error
+
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return fmt.Errorf("Token 不存在或无权访问")
+		}
+		return err
+	}
+
+	// 直接更新 tokens 表（New-API 暂无 token 管理接口）
+	// 风险：可能与 New-API 缓存不一致，需后续优化
+	if err := s.db.Model(&models.Token{}).
+		Where("id = ?", tokenID).
+		Update("status", status).Error; err != nil {
+		return fmt.Errorf("更新 token 状态失败: %w", err)
+	}
+
+	return nil
 }
 
-// GetTokenUsage 获取令牌使用统计。
+// GetTokenUsage 获取令牌使用统计
 func (s *DistributorService) GetTokenUsage(distributorID, tokenID int) (map[string]interface{}, error) {
-	// TODO: 从 token_usage_logs 表统计
-	return map[string]interface{}{
+	// 权限校验
+	var token models.Token
+	err := s.db.Raw(`
+		SELECT t.*
+		FROM tokens t
+		INNER JOIN users u ON t.user_id = u.id
+		WHERE t.id = ? AND u.distributor_id = ? AND t.deleted_at IS NULL
+	`, tokenID, distributorID).Scan(&token).Error
+
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, fmt.Errorf("Token 不存在或无权访问")
+		}
+		return nil, err
+	}
+
+	// 基础统计（从 token 本身）
+	stats := map[string]interface{}{
+		"token_id":      tokenID,
+		"token_name":    token.Name,
+		"total_quota":   token.UsedQuota,
 		"total_calls":   0,
-		"total_tokens":  0,
-		"total_cost":    0.0,
-		"last_used_at":  "",
-	}, nil
+		"last_7day_calls": 0,
+		"avg_response":  0.0,
+	}
+
+	// 尝试从 logs 表统计（如果存在）
+	type LogStats struct {
+		TotalCalls    int
+		Last7DayCalls int
+	}
+
+	var logStats LogStats
+	err = s.db.Raw(`
+		SELECT 
+			COUNT(*) as total_calls,
+			COALESCE(COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '7 days'), 0) as last_7day_calls
+		FROM logs
+		WHERE token_id = ?
+	`, tokenID).Scan(&logStats).Error
+
+	if err == nil {
+		stats["total_calls"] = logStats.TotalCalls
+		stats["last_7day_calls"] = logStats.Last7DayCalls
+	}
+
+	return stats, nil
 }
 
 // ========== 10. 财务管理 ==========

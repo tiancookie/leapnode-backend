@@ -513,3 +513,19 @@ type RedeemCode struct {
 func (RedeemCode) TableName() string {
 	return "redeem_codes"
 }
+
+// QuotaRecord 额度调整记录 -> quota_records
+type QuotaRecord struct {
+	ID            uint      `gorm:"primaryKey" json:"id"`
+	UserID        int       `json:"user_id"`
+	DistributorID int       `json:"distributor_id"`
+	ChangeAmount  int64     `json:"change_amount"`
+	BeforeQuota   int64     `json:"before_quota"`
+	AfterQuota    int64     `json:"after_quota"`
+	Reason        string    `json:"reason"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
+func (QuotaRecord) TableName() string {
+	return "quota_records"
+}
