@@ -2,6 +2,7 @@
 package services
 
 import (
+	cryptorand "crypto/rand"
 	"errors"
 	"fmt"
 	"time"
@@ -555,12 +556,22 @@ func (s *DistributorService) GenerateDistributorRedeemCodes(distributorID int, n
 	return codes, nil
 }
 
-// generateUniqueRedeemCode 生成格式为 LEAP-{8位随机大写字母数字} 的兑换码
+// generateUniqueRedeemCode 生成格式为 LEAP-{8位随机大写字母数字} 的兑换码。
+// 用 crypto/rand 生成真随机字节, 避免用 time.Now().UnixNano() 在纳秒级循环里
+// 取到几乎相同的值 (会导致 8 个字符雷同、批量生成时大量撞库近乎死循环)。
 func generateUniqueRedeemCode() string {
 	const charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 	b := make([]byte, 8)
+	if _, err := cryptorand.Read(b); err != nil {
+		// 极端情况降级到时间种子, 仍然逐字节偏移避免雷同
+		seed := time.Now().UnixNano()
+		for i := range b {
+			b[i] = charset[(seed+int64(i)*7)%int64(len(charset))]
+		}
+		return "LEAP-" + string(b)
+	}
 	for i := range b {
-		b[i] = charset[time.Now().UnixNano()%int64(len(charset))]
+		b[i] = charset[int(b[i])%len(charset)]
 	}
 	return "LEAP-" + string(b)
 }
@@ -752,8 +763,11 @@ func (s *DistributorService) GetDistributorUserDetail(distributorID, userID int)
 func (s *DistributorService) AdjustDistributorUserQuota(distributorID, userID int, amount int64) error {
 	var beforeQuota, afterQuota int64
 
+	// ⚠️ ADR-001 数据一致性: users.quota 只由 New-API 写。
+	// LeapNode 只做权限校验 + 审计日志, quota 本身通过 New-API 管理接口修改,
+	// 绝不直接写 users 表 (LeapNode 与 New-API 共享同一张 users 表, 双写会重复累加)。
 	err := s.db.Transaction(func(tx *gorm.DB) error {
-		// 1. 权限校验 + 锁行
+		// 1. 权限校验 + 锁行 (只读校验归属, 拿当前 quota 做审计基线)
 		var user models.User
 		if err := tx.Raw("SELECT * FROM users WHERE id = ? AND distributor_id = ? FOR UPDATE", userID, distributorID).
 			Scan(&user).Error; err != nil {
@@ -762,8 +776,11 @@ func (s *DistributorService) AdjustDistributorUserQuota(distributorID, userID in
 			}
 			return err
 		}
+		if user.ID == 0 {
+			return fmt.Errorf("用户不存在或无权访问")
+		}
 
-		// 2. 计算新额度
+		// 2. 计算新额度 (仅用于审计与负数校验)
 		beforeQuota = user.Quota
 		afterQuota = user.Quota + amount
 
@@ -771,7 +788,7 @@ func (s *DistributorService) AdjustDistributorUserQuota(distributorID, userID in
 			return fmt.Errorf("扣减后余额不能为负数")
 		}
 
-		// 3. 记录 quota_records
+		// 3. 记录 quota_records 审计日志 (LeapNode 独占表, 可以直接写)
 		record := models.QuotaRecord{
 			UserID:        userID,
 			DistributorID: distributorID,
@@ -785,11 +802,6 @@ func (s *DistributorService) AdjustDistributorUserQuota(distributorID, userID in
 			return fmt.Errorf("记录额度变化失败: %w", err)
 		}
 
-		// 4. 更新本地 users 表
-		if err := tx.Model(&user).Update("quota", afterQuota).Error; err != nil {
-			return fmt.Errorf("更新本地 quota 失败: %w", err)
-		}
-
 		return nil
 	})
 
@@ -797,11 +809,16 @@ func (s *DistributorService) AdjustDistributorUserQuota(distributorID, userID in
 		return err
 	}
 
-	// 5. 同步到 New-API（事务外，防阻塞）
+	// 4. 通过 New-API 管理接口修改 quota (唯一的 quota 写入路径)。
+	//    失败必须返回错误, 否则审计日志已落但实际 quota 未变, 数据不一致。
 	if amount > 0 {
-		_ = s.newAPIClient.IncreaseQuota(userID, int(amount))
+		if apiErr := s.newAPIClient.IncreaseQuota(userID, int(amount)); apiErr != nil {
+			return fmt.Errorf("New-API 加额度失败, quota 未变更 (审计已记录, 需人工核对): %w", apiErr)
+		}
 	} else if amount < 0 {
-		_ = s.newAPIClient.DecreaseQuota(userID, int(-amount))
+		if apiErr := s.newAPIClient.DecreaseQuota(userID, int(-amount)); apiErr != nil {
+			return fmt.Errorf("New-API 扣额度失败, quota 未变更 (审计已记录, 需人工核对): %w", apiErr)
+		}
 	}
 
 	return nil
