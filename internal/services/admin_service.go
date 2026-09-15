@@ -343,8 +343,36 @@ func (s *AdminService) ApproveMerchant(applicationID int, adminRemark string) er
 			return err
 		}
 
-		// 升级用户等级为商家 (user_level = 2)
-		return tx.Model(&models.User{}).Where("id = ?", app.UserID).Update("user_level", 2).Error
+		// 升级用户等级为商家 (user_level = 2，扩展列可直接写)
+		if err := tx.Model(&models.User{}).Where("id = ?", app.UserID).Update("user_level", 2).Error; err != nil {
+			return err
+		}
+
+		// 创建 merchant 记录（若不存在）——商家中心所有接口依赖此记录。
+		// 之前缺此步导致审批通过后访问商家中心报 "merchant not found"。
+		var existing models.Merchant
+		err := tx.Where("user_id = ?", app.UserID).First(&existing).Error
+		if err == nil {
+			return nil // 已存在，幂等
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		merchantName := app.CompanyName
+		if merchantName == "" {
+			merchantName = fmt.Sprintf("merchant_%d", app.UserID)
+		}
+		merchant := models.Merchant{
+			UserID:         uint(app.UserID),
+			MerchantName:   merchantName,
+			MerchantHandle: fmt.Sprintf("m%d", app.UserID),
+			MerchantLevel:  "gold",
+			DepositAmount:  app.DepositAmount,
+			CommissionRate: 0.30,
+			Status:         1,
+			CreatedAt:      now,
+		}
+		return tx.Create(&merchant).Error
 	})
 }
 
@@ -435,7 +463,34 @@ func (s *AdminService) ApproveDistributor(applicationID int, adminRemark string)
 		}
 
 		// 升级用户等级为分站 (user_level = 3)
-		return tx.Model(&models.User{}).Where("id = ?", app.UserID).Update("user_level", 3).Error
+		if err := tx.Model(&models.User{}).Where("id = ?", app.UserID).Update("user_level", 3).Error; err != nil {
+			return err
+		}
+
+		// 创建 distributor_sites 记录（若不存在）——分站后台所有接口依赖此记录。
+		var existing models.DistributorSite
+		err := tx.Where("owner_id = ?", app.UserID).First(&existing).Error
+		if err == nil {
+			return nil // 已存在，幂等
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		siteName := app.CompanyName
+		if siteName == "" {
+			siteName = fmt.Sprintf("站点_%d", app.UserID)
+		}
+		site := models.DistributorSite{
+			OwnerID:           uint(app.UserID),
+			Slug:              fmt.Sprintf("d%d", app.UserID),
+			Name:              siteName,
+			Theme:             "default",
+			MarkupMode:        "global",
+			GlobalMarkupRatio: 3.0, // 默认全站加价 300%（老大定的）
+			Status:            1,
+			CreatedAt:         now,
+		}
+		return tx.Create(&site).Error
 	})
 }
 
