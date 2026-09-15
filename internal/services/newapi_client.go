@@ -8,15 +8,26 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 )
 
 // NewAPIClient 封装对 New-API 的 HTTP 调用，避免直接写 users 表。
+//
+// Token 管理: New-API 的 access_token 15 分钟过期。客户端存 root 账密，
+// token 失效时自动重新登录刷新，调用方无需关心 token 生命周期。
 type NewAPIClient struct {
 	baseURL    string
 	httpClient *http.Client
-	// 管理员 token（从环境变量读取，用于调用 New-API 管理接口）
-	adminToken string
+
+	// root 管理员账密（用于自动登录刷新 token）
+	adminUsername string
+	adminPassword string
+
+	// token 缓存 + 过期时间 + 并发锁
+	mu          sync.Mutex
+	adminToken  string
+	tokenExpiry time.Time
 }
 
 // NewNewAPIClient 创建 New-API 客户端。
@@ -25,11 +36,10 @@ func NewNewAPIClient() *NewAPIClient {
 	if baseURL == "" {
 		baseURL = "http://new-api.railway.internal:3000" // Railway 内网默认
 	}
-	adminToken := os.Getenv("NEW_API_ADMIN_TOKEN")
-	if adminToken == "" {
-		// 不 panic: 缺 token 时降级, 调用 New-API 写操作会返回错误但服务能启动。
-		// 允许 bootstrap 端点 / 只读接口正常工作。
-		log.Println("warning: NEW_API_ADMIN_TOKEN not set, New-API write operations will fail until configured")
+	adminUsername := os.Getenv("NEW_API_ADMIN_USERNAME")
+	adminPassword := os.Getenv("NEW_API_ADMIN_PASSWORD")
+	if adminUsername == "" || adminPassword == "" {
+		log.Println("warning: NEW_API_ADMIN_USERNAME/PASSWORD not set, New-API write operations will fail until configured")
 	}
 
 	return &NewAPIClient{
@@ -37,8 +47,71 @@ func NewNewAPIClient() *NewAPIClient {
 		httpClient: &http.Client{
 			Timeout: 10 * time.Second,
 		},
-		adminToken: adminToken,
+		adminUsername: adminUsername,
+		adminPassword: adminPassword,
 	}
+}
+
+// getAdminToken 返回有效的 admin token，过期或首次调用时自动登录刷新。
+// 线程安全。
+func (c *NewAPIClient) getAdminToken() (string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// 提前 60s 刷新，避免边界过期
+	if c.adminToken != "" && time.Now().Before(c.tokenExpiry.Add(-60*time.Second)) {
+		return c.adminToken, nil
+	}
+
+	if c.adminUsername == "" || c.adminPassword == "" {
+		return "", fmt.Errorf("New-API admin credentials not configured")
+	}
+
+	// 登录刷新
+	url := fmt.Sprintf("%s/api/user/login", c.baseURL)
+	payload, _ := json.Marshal(map[string]interface{}{
+		"username": c.adminUsername,
+		"password": c.adminPassword,
+	})
+	req, err := http.NewRequest("POST", url, bytes.NewReader(payload))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("admin login failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("admin login status %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var result struct {
+		Success bool `json:"success"`
+		Data    struct {
+			AccessToken    string `json:"access_token"`
+			AccessExpires  int64  `json:"access_expires_at"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return "", err
+	}
+	if !result.Success || result.Data.AccessToken == "" {
+		return "", fmt.Errorf("admin login returned no token")
+	}
+
+	c.adminToken = result.Data.AccessToken
+	if result.Data.AccessExpires > 0 {
+		c.tokenExpiry = time.Unix(result.Data.AccessExpires, 0)
+	} else {
+		c.tokenExpiry = time.Now().Add(10 * time.Minute) // 保守默认
+	}
+	log.Printf("New-API admin token refreshed, expires at %s", c.tokenExpiry.Format(time.RFC3339))
+	return c.adminToken, nil
 }
 
 // CreateUser 通过 New-API 创建用户（POST /api/user/register 或管理接口）。
@@ -59,7 +132,7 @@ func (c *NewAPIClient) CreateUser(username, password, email string) (int, error)
 	if err != nil {
 		return 0, err
 	}
-	req.Header.Set("Authorization", "Bearer "+c.adminToken)
+	// register 是公开接口，无需 token
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.httpClient.Do(req)
@@ -98,12 +171,16 @@ func (c *NewAPIClient) CreateUser(username, password, email string) (int, error)
 
 // getUserIDByUsername 按用户名反查用户 ID。
 func (c *NewAPIClient) getUserIDByUsername(username string) (int, error) {
+	token, err := c.getAdminToken()
+	if err != nil {
+		return 0, err
+	}
 	url := fmt.Sprintf("%s/api/user/search?keyword=%s", c.baseURL, username)
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return 0, err
 	}
-	req.Header.Set("Authorization", "Bearer "+c.adminToken)
+	req.Header.Set("Authorization", "Bearer "+token)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -185,6 +262,10 @@ func (c *NewAPIClient) SetUserQuota(userID int, quota int) error {
 
 // manageUser 调用 POST /api/user/manage（需 AdminAuth）。
 func (c *NewAPIClient) manageUser(req manageUserRequest) error {
+	token, err := c.getAdminToken()
+	if err != nil {
+		return err
+	}
 	url := fmt.Sprintf("%s/api/user/manage", c.baseURL)
 	body, err := json.Marshal(req)
 	if err != nil {
@@ -195,7 +276,7 @@ func (c *NewAPIClient) manageUser(req manageUserRequest) error {
 	if err != nil {
 		return err
 	}
-	httpReq.Header.Set("Authorization", "Bearer "+c.adminToken)
+	httpReq.Header.Set("Authorization", "Bearer "+token)
 	httpReq.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.httpClient.Do(httpReq)
@@ -287,12 +368,16 @@ type userInfo struct {
 
 // getUser 获取用户信息（调用 GET /api/user/:id）。
 func (c *NewAPIClient) getUser(userID int) (*userInfo, error) {
+	token, err := c.getAdminToken()
+	if err != nil {
+		return nil, err
+	}
 	url := fmt.Sprintf("%s/api/user/%d", c.baseURL, userID)
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+c.adminToken)
+	req.Header.Set("Authorization", "Bearer "+token)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -323,6 +408,10 @@ func (c *NewAPIClient) getUser(userID int) (*userInfo, error) {
 
 // updateUser 更新用户信息（调用 PUT /api/user/, body 带 id，需 AdminAuth）。
 func (c *NewAPIClient) updateUser(userID int, updates map[string]interface{}) error {
+	token, err := c.getAdminToken()
+	if err != nil {
+		return err
+	}
 	url := fmt.Sprintf("%s/api/user/", c.baseURL)
 	// 确保 body 里带 id（New-API UpdateUser 从 body 读 id，不是 URL）
 	updates["id"] = userID
@@ -335,7 +424,7 @@ func (c *NewAPIClient) updateUser(userID int, updates map[string]interface{}) er
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Authorization", "Bearer "+c.adminToken)
+	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.httpClient.Do(req)
