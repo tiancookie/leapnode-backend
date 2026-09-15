@@ -150,9 +150,22 @@ func (s *UserService) Register(in RegisterInput) (*models.User, error) {
 		}
 	}
 
-	// TODO(parent): aff_code 归因。in.AffCode 为邀请人的 aff_code,
-	// 需查邀请人并写 inviter_id + 发放注册奖励 (referral_config)。
-	// 涉及资金池结算, 留待返佣模块统一实现。当前仅忽略。
+	// --- aff_code 归因（批7补完）---
+	// 1. 查找邀请人
+	var inviter *models.User
+	var distributorID int = 0 // 默认总站用户
+	if in.AffCode != "" {
+		var inv models.User
+		if err := s.db.Where("aff_code = ?", in.AffCode).First(&inv).Error; err == nil {
+			inviter = &inv
+			// 如果邀请人是分站主（user_level=3），新用户归属该分站
+			if inv.UserLevel == 3 {
+				distributorID = inv.ID
+			}
+			// TODO(返佣): 发放注册奖励，更新 inviter.aff_count
+		}
+		// 推广码无效不报错（允许用户随便填），只是不归因
+	}
 
 	// aff_code 列有 uniqueIndex, 每个用户必须有唯一邀请码 (New-API 语义)。
 	// 空串会在第 2 个用户注册时撞唯一约束, 故此处生成唯一随机码。
@@ -173,9 +186,15 @@ func (s *UserService) Register(in RegisterInput) (*models.User, error) {
 		return nil, err
 	}
 
-	// --- 补写 LeapNode 扩展字段（aff_code/user_level）---
+	// --- 补写 LeapNode 扩展字段（aff_code/user_level/distributor_id）---
 	user.AffCode = affCode
 	user.UserLevel = 0
+	if inviter != nil {
+		user.InviterID = inviter.ID
+	}
+	if distributorID > 0 {
+		user.DistributorID = &distributorID
+	}
 	if err := s.db.Save(&user).Error; err != nil {
 		return nil, err
 	}
