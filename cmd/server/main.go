@@ -108,6 +108,9 @@ func main() {
 	packageService := services.NewPackageService(db)
 	packageController := controllers.NewPackageController(packageService)
 
+	channelGroupService := services.NewChannelGroupService(db)
+	channelGroupController := controllers.NewChannelGroupController(channelGroupService)
+
 	dist := router.Group("/api/dist")
 	{
 		siteGroup := dist.Group("/site")
@@ -162,6 +165,9 @@ func main() {
 		adminPackages := dist.Group("/admin")
 		adminPackages.Use(middleware.AuthRequired(db))
 		packageController.RegisterAdminRoutes(adminPackages)
+
+		// 渠道分组管理: 受保护路由 (admin/channel-groups CRUD)
+		channelGroupController.RegisterRoutes(adminPackages)
 	}
 
 	// 管理员后台: /api/admin/* (需要 AuthRequired + AdminAuth)

@@ -468,4 +468,36 @@ ALTER TABLE IF EXISTS distributor_sites ADD COLUMN IF NOT EXISTS seo_description
 ALTER TABLE IF EXISTS distributor_sites ADD COLUMN IF NOT EXISTS balance         DECIMAL(12,2) DEFAULT 0;
 ALTER TABLE IF EXISTS distributor_sites ADD COLUMN IF NOT EXISTS total_revenue   DECIMAL(12,2) DEFAULT 0;
 
+-- =============================================================================
+-- PART 9: 渠道分组表 (Batch 6)
+--   分站可创建渠道分组（如"高优先级"、"备用池"），关联多个 channels，
+--   用于灵活的流量路由和负载均衡。
+-- =============================================================================
+
+-- 渠道分组表
+CREATE TABLE IF NOT EXISTS channel_groups (
+    id             SERIAL PRIMARY KEY,
+    distributor_id INT NOT NULL,                      -- 所属分站（0=总站）
+    name           VARCHAR(100) NOT NULL,             -- 分组名称
+    description    TEXT,                              -- 分组描述
+    priority       INT DEFAULT 0,                     -- 优先级（数字越大越高）
+    enabled        BOOLEAN DEFAULT TRUE,              -- 是否启用
+    created_at     TIMESTAMP DEFAULT NOW(),
+    updated_at     TIMESTAMP DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_channel_groups_distributor ON channel_groups(distributor_id);
+CREATE INDEX IF NOT EXISTS idx_channel_groups_enabled     ON channel_groups(enabled);
+
+-- 渠道分组与渠道关联表
+CREATE TABLE IF NOT EXISTS channel_group_relations (
+    id         SERIAL PRIMARY KEY,
+    group_id   INT NOT NULL,                          -- 关联 channel_groups.id
+    channel_id INT NOT NULL,                          -- 关联 channels.id
+    weight     INT DEFAULT 1,                         -- 权重（用于负载均衡）
+    created_at TIMESTAMP DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_channel_group_relations_group   ON channel_group_relations(group_id);
+CREATE INDEX IF NOT EXISTS idx_channel_group_relations_channel ON channel_group_relations(channel_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_channel_group_relations_unique ON channel_group_relations(group_id, channel_id);
+
 COMMIT;
