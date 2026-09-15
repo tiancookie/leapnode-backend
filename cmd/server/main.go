@@ -207,15 +207,22 @@ func main() {
 			return
 		}
 		
-		// 先查询是否已存在
-		var existingSiteID int
-		err := sqlDB.QueryRow(`SELECT id FROM distributor_sites WHERE owner_id = $1`, userID).Scan(&existingSiteID)
-		if err == nil {
-			c.JSON(200, gin.H{"success": true, "site_id": existingSiteID, "user_id": userID, "message": "已存在"})
+		// 1. 升级用户为分站站长（user_level=3）
+		_, err := sqlDB.Exec(`UPDATE users SET user_level = 3 WHERE id = $1`, userID)
+		if err != nil {
+			c.JSON(500, gin.H{"error": "update user_level failed: " + err.Error()})
 			return
 		}
 		
-		// 不存在则创建
+		// 2. 查询是否已存在分站
+		var existingSiteID int
+		err = sqlDB.QueryRow(`SELECT id FROM distributor_sites WHERE owner_id = $1`, userID).Scan(&existingSiteID)
+		if err == nil {
+			c.JSON(200, gin.H{"success": true, "site_id": existingSiteID, "user_id": userID, "message": "已存在，user_level已更新为3"})
+			return
+		}
+		
+		// 3. 不存在则创建分站
 		var siteID int
 		err = sqlDB.QueryRow(`
 			INSERT INTO distributor_sites (owner_id, slug, name, status, global_markup_ratio)
@@ -226,7 +233,7 @@ func main() {
 			c.JSON(500, gin.H{"error": err.Error()})
 			return
 		}
-		c.JSON(200, gin.H{"success": true, "site_id": siteID, "user_id": userID})
+		c.JSON(200, gin.H{"success": true, "site_id": siteID, "user_id": userID, "user_level": 3})
 	})
 
 	go func() {
