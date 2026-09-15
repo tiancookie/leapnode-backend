@@ -11,12 +11,16 @@ import (
 
 // DistributorService 实现分站管理后台业务逻辑。
 type DistributorService struct {
-	db *gorm.DB
+	db           *gorm.DB
+	newAPIClient *NewAPIClient
 }
 
 // NewDistributorService 创建 DistributorService。
-func NewDistributorService(db *gorm.DB) *DistributorService {
-	return &DistributorService{db: db}
+func NewDistributorService(db *gorm.DB, newAPIClient *NewAPIClient) *DistributorService {
+	return &DistributorService{
+		db:           db,
+		newAPIClient: newAPIClient,
+	}
 }
 
 // ========== 1. 经营概览（Dashboard）==========
@@ -427,9 +431,8 @@ func (s *DistributorService) AdjustDistributorUserQuota(distributorID, userID in
 		return err
 	}
 
-	// 调整额度
-	return s.db.Model(&models.User{}).Where("id = ?", userID).
-		Update("quota", gorm.Expr("quota + ?", amount)).Error
+	// 调整额度（走 New-API，quota 是 New-API 缓存的热点字段）
+	return s.newAPIClient.IncreaseQuota(userID, int(amount))
 }
 
 // GetUserOrders 获取用户订单记录。

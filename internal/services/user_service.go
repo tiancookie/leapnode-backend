@@ -7,21 +7,25 @@ import (
 	"math/big"
 	"regexp"
 	"strings"
-	"time"
 
 	"github.com/tiancookie/leapnode-backend/internal/models"
+
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 )
 
 // UserService 用户认证与账户服务。
 type UserService struct {
-	db *gorm.DB
+	db           *gorm.DB
+	newAPIClient *NewAPIClient
 }
 
 // NewUserService 创建 UserService。
-func NewUserService(db *gorm.DB) *UserService {
-	return &UserService{db: db}
+func NewUserService(db *gorm.DB, newAPIClient *NewAPIClient) *UserService {
+	return &UserService{
+		db:           db,
+		newAPIClient: newAPIClient,
+	}
 }
 
 // 业务错误 (由 controller 映射为 message + 状态码)。
@@ -146,12 +150,6 @@ func (s *UserService) Register(in RegisterInput) (*models.User, error) {
 		}
 	}
 
-	// --- bcrypt 哈希 ---
-	hash, err := bcrypt.GenerateFromPassword([]byte(in.Password), bcrypt.DefaultCost)
-	if err != nil {
-		return nil, err
-	}
-
 	// TODO(parent): aff_code 归因。in.AffCode 为邀请人的 aff_code,
 	// 需查邀请人并写 inviter_id + 发放注册奖励 (referral_config)。
 	// 涉及资金池结算, 留待返佣模块统一实现。当前仅忽略。
@@ -163,22 +161,25 @@ func (s *UserService) Register(in RegisterInput) (*models.User, error) {
 		return nil, err
 	}
 
-	user := models.User{
-		Username:     username,
-		Password:     string(hash),
-		DisplayName:  username,
-		Email:        email,
-		Role:         1, // New-API: 1=普通用户
-		Status:       1, // 1=正常
-		Quota:        0,
-		AffCode:      affCode,
-		Group:        "default",
-		UserLevel:    0,
-		CreatedTime:  time.Now().Unix(),
-	}
-	if err := s.db.Create(&user).Error; err != nil {
+	// --- 通过 New-API 创建用户 (写操作) ---
+	userID, err := s.newAPIClient.CreateUser(username, in.Password, email)
+	if err != nil {
 		return nil, err
 	}
+
+	// --- 读回本地库（New-API AutoMigrate 已写入）---
+	var user models.User
+	if err := s.db.Where("id = ?", userID).First(&user).Error; err != nil {
+		return nil, err
+	}
+
+	// --- 补写 LeapNode 扩展字段（aff_code/user_level）---
+	user.AffCode = affCode
+	user.UserLevel = 0
+	if err := s.db.Save(&user).Error; err != nil {
+		return nil, err
+	}
+
 	return &user, nil
 }
 
@@ -228,11 +229,8 @@ func (s *UserService) ChangePassword(userID int, originalPassword, newPassword s
 	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(originalPassword)); err != nil {
 		return ErrWrongPassword
 	}
-	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
-	if err != nil {
-		return err
-	}
-	return s.db.Model(&models.User{}).Where("id = ?", userID).Update("password", string(hash)).Error
+	// 通过 New-API 修改密码
+	return s.newAPIClient.UpdateUserPassword(userID, newPassword)
 }
 
 // UpdateLanguage 更新用户界面语言。

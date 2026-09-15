@@ -12,12 +12,16 @@ import (
 
 // AdminService 实现总站管理员后台业务逻辑。
 type AdminService struct {
-	db *gorm.DB
+	db           *gorm.DB
+	newAPIClient *NewAPIClient
 }
 
 // NewAdminService 创建 AdminService。
-func NewAdminService(db *gorm.DB) *AdminService {
-	return &AdminService{db: db}
+func NewAdminService(db *gorm.DB, newAPIClient *NewAPIClient) *AdminService {
+	return &AdminService{
+		db:           db,
+		newAPIClient: newAPIClient,
+	}
 }
 
 // ========== 1. 系统概览（Dashboard）==========
@@ -257,19 +261,19 @@ type AdjustUserQuotaInput struct {
 
 // AdjustUserQuota 手动调整用户余额。
 func (s *AdminService) AdjustUserQuota(userID int, input AdjustUserQuotaInput) error {
-	return s.db.Transaction(func(tx *gorm.DB) error {
-		var user models.User
-		if err := tx.Where("id = ?", userID).First(&user).Error; err != nil {
-			return err
-		}
+	// 先读取当前余额验证
+	var user models.User
+	if err := s.db.Where("id = ?", userID).First(&user).Error; err != nil {
+		return err
+	}
 
-		newQuota := user.Quota + input.QuotaDelta
-		if newQuota < 0 {
-			return errors.New("insufficient quota")
-		}
+	newQuota := user.Quota + input.QuotaDelta
+	if newQuota < 0 {
+		return errors.New("insufficient quota")
+	}
 
-		return tx.Model(&user).Update("quota", newQuota).Error
-	})
+	// 调用 New-API 设置新余额（调用 /api/user/:id 更新接口）
+	return s.newAPIClient.SetUserQuota(userID, int(newQuota))
 }
 
 // ========== 3. 商家审批 ==========

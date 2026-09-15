@@ -63,12 +63,16 @@ const (
 
 // TopupService 充值相关业务逻辑。
 type TopupService struct {
-	db *gorm.DB
+	db           *gorm.DB
+	newAPIClient *NewAPIClient
 }
 
 // NewTopupService 创建 TopupService。
-func NewTopupService(db *gorm.DB) *TopupService {
-	return &TopupService{db: db}
+func NewTopupService(db *gorm.DB, newAPIClient *NewAPIClient) *TopupService {
+	return &TopupService{
+		db:           db,
+		newAPIClient: newAPIClient,
+	}
 }
 
 // RedeemCodeInput 兑换充值码入参。
@@ -150,14 +154,9 @@ func (s *TopupService) RedeemCode(userID int, key string) (*RedeemCodeResult, er
 			return ErrRedeemCodeUsed
 		}
 
-		// 5. 给用户增加 quota（redemption.Quota 直接加到 user.Quota）
-		err = tx.Model(&models.User{}).
-			Where("id = ?", userID).
-			Update("quota", gorm.Expr("quota + ?", redemption.Quota)).
-			Error
-
-		if err != nil {
-			return err
+		// 5. 调用 New-API 增加 quota（通过 HTTP API，不直接写 users 表）
+		if err := s.newAPIClient.IncreaseQuota(userID, redemption.Quota); err != nil {
+			return fmt.Errorf("failed to increase quota via New-API: %w", err)
 		}
 
 		// 构造返回结果
@@ -685,11 +684,9 @@ func (s *TopupService) ConfirmCryptoOrderPaid(tradeNo, txHash string) error {
 			return nil
 		}
 
-		// 给用户加 quota。
-		if err := tx.Model(&models.User{}).
-			Where("id = ?", order.UserID).
-			Update("quota", gorm.Expr("quota + ?", order.Quota)).Error; err != nil {
-			return err
+		// 给用户加 quota（调用 New-API HTTP API）。
+		if err := s.newAPIClient.IncreaseQuota(order.UserID, int(order.Quota)); err != nil {
+			return fmt.Errorf("failed to increase quota via New-API: %w", err)
 		}
 
 		// 写 topup_orders 历史 (统一充值记录)。

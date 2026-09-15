@@ -16,12 +16,16 @@ import (
 
 // AffService 返佣服务
 type AffService struct {
-	db *gorm.DB
+	db           *gorm.DB
+	newAPIClient *NewAPIClient
 }
 
 // NewAffService 创建返佣服务实例
-func NewAffService(db *gorm.DB) *AffService {
-	return &AffService{db: db}
+func NewAffService(db *gorm.DB, newAPIClient *NewAPIClient) *AffService {
+	return &AffService{
+		db:           db,
+		newAPIClient: newAPIClient,
+	}
 }
 
 // GenerateAffCode 生成6位邀请码（大写字母+数字）
@@ -143,7 +147,7 @@ func (s *AffService) TransferAffQuota(userID int, amountUSD float64) (map[string
 
 	quotaAmount := utils.DollarsToQuota(amountUSD)
 
-	// 事务处理
+	// 步骤1: 事务内扣除 aff_quota（LeapNode 扩展列，New-API 不管）+ 写历史
 	err := s.db.Transaction(func(tx *gorm.DB) error {
 		var user models.User
 		if err := tx.First(&user, userID).Error; err != nil {
@@ -154,11 +158,8 @@ func (s *AffService) TransferAffQuota(userID int, amountUSD float64) (map[string
 			return errors.New("insufficient aff_quota balance")
 		}
 
-		// 扣除 aff_quota，增加 quota
-		if err := tx.Model(&user).Updates(map[string]interface{}{
-			"aff_quota": gorm.Expr("aff_quota - ?", quotaAmount),
-			"quota":     gorm.Expr("quota + ?", quotaAmount),
-		}).Error; err != nil {
+		// 仅扣除 aff_quota（LeapNode 扩展列）
+		if err := tx.Model(&user).Update("aff_quota", gorm.Expr("aff_quota - ?", quotaAmount)).Error; err != nil {
 			return err
 		}
 
@@ -175,6 +176,13 @@ func (s *AffService) TransferAffQuota(userID int, amountUSD float64) (map[string
 
 	if err != nil {
 		return nil, err
+	}
+
+	// 步骤2: 通过 New-API 增加 quota（New-API 缓存的热点字段，必须走 API）
+	// 注意: 若此步失败，aff_quota 已扣但 quota 未加，需补偿（记录到失败队列）。
+	// TODO(补偿): 增加失败重试/对账机制。当前失败会返回错误，aff_quota 已扣需人工核对。
+	if err := s.newAPIClient.IncreaseQuota(userID, int(quotaAmount)); err != nil {
+		return nil, fmt.Errorf("aff_quota deducted but failed to increase quota via New-API (needs reconciliation): %w", err)
 	}
 
 	// 查询最新余额

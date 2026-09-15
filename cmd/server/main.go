@@ -77,29 +77,32 @@ func main() {
 		c.JSON(http.StatusOK, gin.H{"status": "ok", "service": "leapnode-backend"})
 	})
 
+	// --- New-API HTTP 客户端 (用于调用 New-API 管理接口，避免直接写 users 表) ---
+	newAPIClient := services.NewNewAPIClient()
+
 	// /api/dist/* 契约需与 SubRouter 前端 100% 兼容, 在 internal/controllers 中逐步实现
 	siteService := services.NewSiteService(db)
 	siteController := controllers.NewSiteController(siteService)
 
-	userService := services.NewUserService(db)
+	userService := services.NewUserService(db, newAPIClient)
 	userController := controllers.NewUserController(userService)
 
 	tokenService := services.NewTokenService(db)
 	tokenController := controllers.NewTokenController(tokenService, siteService)
 
-	topupService := services.NewTopupService(db)
+	topupService := services.NewTopupService(db, newAPIClient)
 	topupController := controllers.NewTopupController(topupService)
 
-	affService := services.NewAffService(db)
+	affService := services.NewAffService(db, newAPIClient)
 	affController := controllers.NewAffController(affService)
 
-	adminService := services.NewAdminService(db)
+	adminService := services.NewAdminService(db, newAPIClient)
 	adminController := controllers.NewAdminController(adminService)
 
 	merchantService := services.NewMerchantService(db)
 	merchantController := controllers.NewMerchantController(merchantService)
 
-	distributorService := services.NewDistributorService(db)
+	distributorService := services.NewDistributorService(db, newAPIClient)
 	distributorController := controllers.NewDistributorController(distributorService)
 
 	dist := router.Group("/api/dist")

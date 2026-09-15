@@ -200,6 +200,9 @@ func (s *TokenService) CreateToken(userID int, in CreateTokenInput) (*models.Tok
 
 // UpdateToken 更新归属于 userID 的令牌 (先校验归属)。
 // 只更新请求体中显式提供 (非 nil) 的字段。
+//
+// ⚠️ 缓存一致性 (ADR-001): 同 DeleteToken, 改 status/额度后 New-API 的 Redis
+// 缓存不会失效, 旧值在 TTL 内仍生效。TODO(联调后切换): 改调 New-API PUT /api/token/。
 func (s *TokenService) UpdateToken(userID, tokenID int, in UpdateTokenInput) (*models.Token, error) {
 	// 先校验归属: 不存在或非本人的 token 返回 ErrTokenNotFound。
 	if _, err := s.GetToken(userID, tokenID); err != nil {
@@ -265,6 +268,13 @@ func (s *TokenService) UpdateToken(userID, tokenID int, in UpdateTokenInput) (*m
 }
 
 // DeleteToken 软删除归属于 userID 的令牌 (先校验归属)。
+//
+// ⚠️ 缓存一致性 (ADR-001): New-API 用 Redis 缓存 token (键 token:HMAC(key))。
+// 直接写库删除后, 若 New-API 启用了 Redis, 缓存里的旧 token 不会失效,
+// Agent 用已删除的 key 在缓存 TTL 内仍能调用 AI。
+// TODO(联调后切换): 改为调 New-API DELETE /api/token/:id, 让 New-API 自己失效缓存。
+// 当前 New-API 未部署且缓存失效键为 HMAC 加密 (LeapNode 无密钥), 暂保留直接写库。
+// 缓解: New-API 未启用 Redis 时无此问题; 启用时缓存 TTL 通常较短。
 func (s *TokenService) DeleteToken(userID, tokenID int) error {
 	token, err := s.GetToken(userID, tokenID)
 	if err != nil {
