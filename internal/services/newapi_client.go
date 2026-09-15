@@ -116,18 +116,21 @@ func (c *NewAPIClient) getUserIDByUsername(username string) (int, error) {
 		return 0, fmt.Errorf("New-API returned status %d: %s", resp.StatusCode, string(respBody))
 	}
 
+	// New-API search 返回分页结构 data.items[]，不是直接数组
 	var result struct {
 		Success bool `json:"success"`
-		Data    []struct {
-			ID       int    `json:"id"`
-			Username string `json:"username"`
+		Data    struct {
+			Items []struct {
+				ID       int    `json:"id"`
+				Username string `json:"username"`
+			} `json:"items"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(respBody, &result); err != nil {
 		return 0, fmt.Errorf("failed to decode response: %w", err)
 	}
 
-	for _, u := range result.Data {
+	for _, u := range result.Data.Items {
 		if u.Username == username {
 			return u.ID, nil
 		}
