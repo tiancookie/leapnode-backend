@@ -222,6 +222,55 @@ func (c *NewAPIClient) manageUser(req manageUserRequest) error {
 	return nil
 }
 
+// VerifyLogin 通过 New-API 校验用户名密码（调用 POST /api/user/login）。
+// 返回用户 ID；密码错误或用户不存在返回 error。
+// 用途: LeapNode 密码归 New-API 管理, 登录校验必须委托给 New-API。
+func (c *NewAPIClient) VerifyLogin(username, password string) (int, error) {
+	url := fmt.Sprintf("%s/api/user/login", c.baseURL)
+	payload := map[string]interface{}{
+		"username": username,
+		"password": password,
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return 0, err
+	}
+
+	req, err := http.NewRequest("POST", url, bytes.NewReader(body))
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return 0, fmt.Errorf("http request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return 0, fmt.Errorf("login failed (status %d)", resp.StatusCode)
+	}
+
+	var result struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+		Data    struct {
+			User struct {
+				ID int `json:"id"`
+			} `json:"user"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return 0, fmt.Errorf("failed to decode response: %w", err)
+	}
+	if !result.Success {
+		return 0, fmt.Errorf("invalid credentials: %s", result.Message)
+	}
+	return result.Data.User.ID, nil
+}
+
 // UpdateUserPassword 更新用户密码（调用 New-API PUT /api/user/, body 带 id+password）。
 func (c *NewAPIClient) UpdateUserPassword(userID int, newPassword string) error {
 	return c.updateUser(userID, map[string]interface{}{

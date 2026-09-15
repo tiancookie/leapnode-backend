@@ -189,15 +189,19 @@ func (s *UserService) Login(username, password string) (*models.User, error) {
 	if username == "" || password == "" {
 		return nil, ErrInvalidCredential
 	}
+	// 密码校验委托给 New-API（密码由 New-API 管理，哈希算法一致性由其保证）。
+	userID, err := s.newAPIClient.VerifyLogin(username, password)
+	if err != nil {
+		return nil, ErrInvalidCredential
+	}
+
+	// 校验通过后从本地库读取完整用户信息（含 LeapNode 扩展字段 user_level/aff_code 等）。
 	var user models.User
-	if err := s.db.Where("username = ?", username).First(&user).Error; err != nil {
+	if err := s.db.Where("id = ?", userID).First(&user).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrInvalidCredential
 		}
 		return nil, err
-	}
-	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(password)); err != nil {
-		return nil, ErrInvalidCredential
 	}
 	if user.Status != 1 {
 		return nil, ErrUserDisabled
