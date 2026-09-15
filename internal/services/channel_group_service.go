@@ -1,6 +1,7 @@
 package services
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/tiancookie/leapnode-backend/internal/models"
@@ -152,12 +153,26 @@ func (s *ChannelGroupService) UpdateChannelGroup(distributorID int, groupID uint
 // DeleteChannelGroup 删除密钥分组
 func (s *ChannelGroupService) DeleteChannelGroup(distributorID int, groupID uint) error {
 	return s.db.Transaction(func(tx *gorm.DB) error {
-		// 1. 删除关联的渠道
-		if err := tx.Where("group_id = ?", groupID).Delete(&models.ChannelGroupRelation{}).Error; err != nil {
-			return fmt.Errorf("failed to delete group channels: %w", err)
+		// 1. 检查分组是否存在且有权限
+		var group models.ChannelGroup
+		if err := tx.Where("id = ? AND distributor_id = ?", groupID, distributorID).First(&group).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return fmt.Errorf("key group not found or no permission")
+			}
+			return fmt.Errorf("failed to query key group: %w", err)
 		}
 
-		// 2. 删除分组本身（需要验证权限）
+		// 2. 检查是否有关联的渠道
+		var channelCount int64
+		if err := tx.Model(&models.ChannelGroupRelation{}).Where("group_id = ?", groupID).Count(&channelCount).Error; err != nil {
+			return fmt.Errorf("failed to count channels: %w", err)
+		}
+
+		if channelCount > 0 {
+			return fmt.Errorf("cannot delete key group with %d assigned channels, remove channels first", channelCount)
+		}
+
+		// 3. 删除分组本身
 		result := tx.Where("id = ? AND distributor_id = ?", groupID, distributorID).
 			Delete(&models.ChannelGroup{})
 
