@@ -36,8 +36,10 @@ func AdminAuth() gin.HandlerFunc {
 			return
 		}
 
-		// 验证管理员权限 (user_level = 10)
-		if user.UserLevel != 10 {
+		// 验证管理员权限: user_level=10 (LeapNode总站管理员) 或 New-API role>=100 (超管)。
+		// New-API 的 role 是权威超管标识，root 用户 role=100 即视为总站管理员，
+		// 避免 user_level 与 role 两套字段割裂导致 root 无法访问管理后台。
+		if user.UserLevel != 10 && user.Role < 100 {
 			utils.ErrorJSON(c, http.StatusForbidden, "admin access required")
 			c.Abort()
 			return
