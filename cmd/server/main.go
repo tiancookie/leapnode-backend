@@ -149,13 +149,6 @@ func main() {
 		}
 	}
 
-	// Bootstrap: 一次性初始化端点 (受 BOOTSTRAP_SECRET 保护，用完删除)
-	bootstrapController := controllers.NewBootstrapController(db)
-	bootstrap := router.Group("/bootstrap")
-	{
-		bootstrapController.RegisterRoutes(bootstrap)
-	}
-
 	// 管理员后台: /api/admin/* (需要 AuthRequired + AdminAuth)
 	admin := router.Group("/api/admin")
 	admin.Use(middleware.AuthRequired(db))
