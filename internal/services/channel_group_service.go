@@ -3,7 +3,6 @@ package services
 import (
 	"errors"
 	"fmt"
-	"log"
 
 	"github.com/tiancookie/leapnode-backend/internal/models"
 	"gorm.io/gorm"
@@ -37,7 +36,7 @@ type ChannelGroupUpdateInput struct {
 
 // ChannelGroupRelationInput 分配渠道请求
 type ChannelGroupRelationInput struct {
-	ChannelIDs []int `json:"channel_ids" binding:"required,min=1"`
+	ChannelIDs []int `json:"channel_ids" binding:"required"` // 允许空数组清空渠道
 	Weight     int   `json:"weight"`
 }
 
@@ -169,8 +168,6 @@ func (s *ChannelGroupService) DeleteChannelGroup(distributorID int, groupID uint
 			return fmt.Errorf("failed to count channels: %w", err)
 		}
 
-		log.Printf("[DEBUG] DeleteChannelGroup: group_id=%d, channel_count=%d", groupID, channelCount)
-
 		if channelCount > 0 {
 			return fmt.Errorf("cannot delete key group with %d assigned channels, remove channels first", channelCount)
 		}
@@ -185,8 +182,6 @@ func (s *ChannelGroupService) DeleteChannelGroup(distributorID int, groupID uint
 		if result.RowsAffected == 0 {
 			return fmt.Errorf("key group not found or no permission")
 		}
-
-		log.Printf("[DEBUG] DeleteChannelGroup: deleted group_id=%d, rows_affected=%d", groupID, result.RowsAffected)
 
 		return nil
 	})
