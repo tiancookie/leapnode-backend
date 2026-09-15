@@ -36,7 +36,7 @@ type ChannelGroupUpdateInput struct {
 
 // ChannelGroupRelationInput 分配渠道请求
 type ChannelGroupRelationInput struct {
-	ChannelIDs []int `json:"channel_ids" binding:"required"` // 允许空数组清空渠道
+	ChannelIDs []int `json:"channel_ids"` // 可为空数组（清空渠道）
 	Weight     int   `json:"weight"`
 }
 
