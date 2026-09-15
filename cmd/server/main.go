@@ -235,5 +235,11 @@ func runMigrations(db *sql.DB) error {
 		return fmt.Errorf("execute migration: %w", err)
 	}
 	
+	// 补充 description 列（旧表可能缺失）
+	_, err = db.Exec("ALTER TABLE packages ADD COLUMN IF NOT EXISTS description TEXT;")
+	if err != nil {
+		log.Printf("warning: failed to add description column (may already exist): %v", err)
+	}
+	
 	return nil
 }
