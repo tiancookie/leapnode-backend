@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"time"
@@ -26,7 +27,9 @@ func NewNewAPIClient() *NewAPIClient {
 	}
 	adminToken := os.Getenv("NEW_API_ADMIN_TOKEN")
 	if adminToken == "" {
-		panic("NEW_API_ADMIN_TOKEN environment variable is required")
+		// 不 panic: 缺 token 时降级, 调用 New-API 写操作会返回错误但服务能启动。
+		// 允许 bootstrap 端点 / 只读接口正常工作。
+		log.Println("warning: NEW_API_ADMIN_TOKEN not set, New-API write operations will fail until configured")
 	}
 
 	return &NewAPIClient{
