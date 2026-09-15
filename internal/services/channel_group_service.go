@@ -203,7 +203,12 @@ func (s *ChannelGroupService) AssignChannels(distributorID int, groupID uint, in
 			return fmt.Errorf("failed to clear old channels: %w", err)
 		}
 
-		// 4. 批量插入新关联
+		// 4. 空数组时只清空不插入（支持清空渠道）
+		if len(input.ChannelIDs) == 0 {
+			return nil
+		}
+
+		// 5. 批量插入新关联
 		weight := input.Weight
 		if weight <= 0 {
 			weight = 1
