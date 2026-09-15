@@ -3,6 +3,7 @@ package services
 
 import (
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/tiancookie/leapnode-backend/internal/models"
@@ -120,51 +121,138 @@ type DistributorModel struct {
 
 // GetModels 获取分站可售模型列表。
 func (s *DistributorService) GetModels(distributorID int, page, pageSize int) ([]DistributorModel, int64, error) {
-	// TODO: 实现模型列表查询
-	// 从 distributor_models 表查询，WHERE distributor_id = ?
-	return []DistributorModel{}, 0, nil
+	var listings []models.DistributorModelListing
+	var total int64
+
+	q := s.db.Model(&models.DistributorModelListing{}).Where("distributor_id = ?", distributorID)
+	q.Count(&total)
+
+	offset := (page - 1) * pageSize
+	if err := q.Order("id DESC").Offset(offset).Limit(pageSize).Find(&listings).Error; err != nil {
+		return nil, 0, err
+	}
+
+	out := make([]DistributorModel, 0, len(listings))
+	for _, l := range listings {
+		// 从绝对售价反推加价（以 input 价为基准展示）。
+		markupType := "fixed"
+		markupValue := l.SellingInputPrice - l.MerchantInputPrice
+		if l.MerchantInputPrice > 0 {
+			markupType = "percentage"
+			markupValue = (l.SellingInputPrice/l.MerchantInputPrice - 1) * 100
+		}
+		out = append(out, DistributorModel{
+			ID:           int(l.ID),
+			ModelName:    l.ModelName,
+			MerchantCost: l.MerchantInputPrice,
+			MarkupType:   markupType,
+			MarkupValue:  markupValue,
+			FinalPrice:   l.SellingInputPrice,
+			Status:       l.Status,
+			CreatedAt:    l.CreatedAt.Format("2006-01-02 15:04:05"),
+		})
+	}
+	return out, total, nil
 }
 
 // EnableModelInput 启用模型输入。
 type EnableModelInput struct {
 	ModelName    string  `json:"model_name"`
-	MerchantCost float64 `json:"merchant_cost"`
+	ChannelID    int     `json:"channel_id"`
+	MerchantID   int     `json:"merchant_id"`
+	MerchantCost float64 `json:"merchant_cost"`  // 商家 input 成本
+	MerchantOutputCost float64 `json:"merchant_output_cost"` // 商家 output 成本
 	MarkupType   string  `json:"markup_type"`   // fixed/percentage
 	MarkupValue  float64 `json:"markup_value"`
 }
 
-// EnableModel 启用模型到分站。
+// calcSellingPrice 按加价策略计算售价。
+func calcSellingPrice(cost float64, markupType string, markupValue float64) float64 {
+	if markupType == "fixed" {
+		return cost + markupValue
+	}
+	// percentage: markupValue 是百分比 (如 300 表示加价 300%)
+	return cost * (1 + markupValue/100)
+}
+
+// EnableModel 启用模型到分站（从商家模型池选品 + 设置加价）。
 func (s *DistributorService) EnableModel(distributorID int, in EnableModelInput) error {
-	// 验证加价类型
 	if in.MarkupType != "fixed" && in.MarkupType != "percentage" {
 		return errors.New("invalid markup_type, must be fixed or percentage")
 	}
+	if in.ModelName == "" {
+		return errors.New("model_name required")
+	}
 
-	// TODO: 插入到 distributor_models 表
-	// 计算 final_price = merchant_cost + markup (fixed) 或 merchant_cost * (1 + markup) (percentage)
-	return errors.New("not implemented")
+	sellingInput := calcSellingPrice(in.MerchantCost, in.MarkupType, in.MarkupValue)
+	sellingOutput := calcSellingPrice(in.MerchantOutputCost, in.MarkupType, in.MarkupValue)
+
+	listing := models.DistributorModelListing{
+		DistributorID:       distributorID,
+		ModelName:           in.ModelName,
+		ChannelID:           in.ChannelID,
+		MerchantID:          in.MerchantID,
+		MerchantInputPrice:  in.MerchantCost,
+		MerchantOutputPrice: in.MerchantOutputCost,
+		SellingInputPrice:   sellingInput,
+		SellingOutputPrice:  sellingOutput,
+		Status:              1,
+		CreatedAt:           time.Now(),
+	}
+	return s.db.Create(&listing).Error
 }
 
-// UpdateModelPricing 更新模型定价。
+// UpdateModelPricing 更新模型定价（重新计算售价）。
 func (s *DistributorService) UpdateModelPricing(distributorID, modelID int, markupType string, markupValue float64) error {
-	// TODO: 更新 distributor_models 表
-	// WHERE id = ? AND distributor_id = ?
-	return errors.New("not implemented")
+	if markupType != "fixed" && markupType != "percentage" {
+		return errors.New("invalid markup_type, must be fixed or percentage")
+	}
+
+	var listing models.DistributorModelListing
+	if err := s.db.Where("id = ? AND distributor_id = ?", modelID, distributorID).First(&listing).Error; err != nil {
+		return fmt.Errorf("model listing not found: %w", err)
+	}
+
+	sellingInput := calcSellingPrice(listing.MerchantInputPrice, markupType, markupValue)
+	sellingOutput := calcSellingPrice(listing.MerchantOutputPrice, markupType, markupValue)
+
+	return s.db.Model(&models.DistributorModelListing{}).
+		Where("id = ? AND distributor_id = ?", modelID, distributorID).
+		Updates(map[string]interface{}{
+			"selling_input_price":  sellingInput,
+			"selling_output_price": sellingOutput,
+		}).Error
 }
 
-// DisableModel 下架模型。
+// DisableModel 下架模型（status=0）。
 func (s *DistributorService) DisableModel(distributorID, modelID int) error {
-	// TODO: 更新 distributor_models 表，status = 0
-	return errors.New("not implemented")
+	result := s.db.Model(&models.DistributorModelListing{}).
+		Where("id = ? AND distributor_id = ?", modelID, distributorID).
+		Update("status", 0)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return errors.New("model listing not found")
+	}
+	return nil
 }
 
 // GetModelStats 获取模型销售统计。
+// TODO(联调后): 从 New-API logs 表按 model+分站用户统计真实调用量/收益。
+// 当前 logs 归 New-API 管，需按 distributor 的用户集合聚合，留待日志聚合专项。
 func (s *DistributorService) GetModelStats(distributorID, modelID int) (map[string]interface{}, error) {
-	// TODO: 从 orders 表统计该模型的调用量和收益
+	var listing models.DistributorModelListing
+	if err := s.db.Where("id = ? AND distributor_id = ?", modelID, distributorID).First(&listing).Error; err != nil {
+		return nil, fmt.Errorf("model listing not found: %w", err)
+	}
 	return map[string]interface{}{
-		"total_calls":   0,
-		"total_revenue": 0.0,
-		"avg_price":     0.0,
+		"model_name":     listing.ModelName,
+		"selling_price":  listing.SellingInputPrice,
+		"merchant_cost":  listing.MerchantInputPrice,
+		"margin":         listing.SellingInputPrice - listing.MerchantInputPrice,
+		"total_calls":    0,   // TODO: 从 logs 聚合
+		"total_revenue":  0.0, // TODO: 从 logs 聚合
 	}, nil
 }
 
