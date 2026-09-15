@@ -25,7 +25,7 @@ func (ctrl *SiteController) RegisterRoutes(group *gin.RouterGroup) {
 	group.GET("/info", ctrl.GetSiteInfo)
 	group.GET("/models", ctrl.GetSiteModels)
 	group.GET("/pricing", ctrl.GetSitePricing)
-	group.GET("/packages", ctrl.GetSitePackages)
+	// /packages 已迁移到 PackageController
 	group.GET("/official-channels", ctrl.GetSiteOfficialChannels)
 	group.GET("/official-channels/:id/availability", ctrl.GetOfficialChannelAvailability)
 	group.GET("/key-groups", ctrl.GetSiteKeyGroups)
@@ -60,16 +60,6 @@ func (ctrl *SiteController) GetSitePricing(c *gin.Context) {
 		return
 	}
 	utils.SuccessJSON(c, pricing)
-}
-
-// GetSitePackages GET /api/dist/site/packages
-func (ctrl *SiteController) GetSitePackages(c *gin.Context) {
-	packages, err := ctrl.siteService.GetSitePackages()
-	if err != nil {
-		utils.ErrorJSON(c, http.StatusInternalServerError, "failed to load packages")
-		return
-	}
-	utils.SuccessJSON(c, packages)
 }
 
 // GetSiteOfficialChannels GET /api/dist/site/official-channels

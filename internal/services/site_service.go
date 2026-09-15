@@ -182,30 +182,7 @@ type PackageResponse struct {
 	Enabled         bool        `json:"enabled"`
 }
 
-// GetSitePackages 获取套餐列表
-func (s *SiteService) GetSitePackages() ([]PackageResponse, error) {
-	var packages []models.Package
-	err := s.db.Where("enabled = ? AND distributor_id = ?", true, 0).Find(&packages).Error
-	if err != nil {
-		return []PackageResponse{}, nil
-	}
-
-	result := make([]PackageResponse, 0, len(packages))
-	for _, p := range packages {
-		result = append(result, PackageResponse{
-			ID:              p.ID,
-			Name:            p.Name,
-			Description:     p.Description,
-			Price:           p.Price,
-			OriginalPrice:   p.OriginalPrice,
-			Duration:        p.DurationDays,
-			QuotaAmount:     p.QuotaAmount,
-			QuotaResetPeriod: p.ResetPeriod,
-			Enabled:         p.Enabled,
-		})
-	}
-	return result, nil
-}
+// GetSitePackages 已迁移到 PackageService
 
 // OfficialChannelResponse 官方渠道响应 (对齐 previewOfficialChannels)
 type OfficialChannelResponse struct {
