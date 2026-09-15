@@ -247,6 +247,15 @@ func (s *MerchantService) GetChannels(userID int) ([]models.Channel, error) {
 }
 
 // CreateChannel 添加上游渠道。
+//
+// ⚠️⚠️ 架构债 (ADR-001, 批3待专项打通): 此处直接写 channels 表, 但 New-API 的
+// AI 调用路由依赖 abilities 表 (channels + abilities 一起才生效)。New-API 自己
+// 建 channel 时会自动 AddAbilities() 建路由记录并刷新 channel 缓存; LeapNode 直接
+// 写 channels 跳过了这步, 导致【商家建的渠道对 AI 调用完全隐形——用户调用 AI 时
+// New-API 不会路由到这些渠道】。
+// 正确做法: 走 New-API POST /api/channel (它同时处理 channels+abilities+缓存)。
+// 当前先保留直接写库 (管理后台能看到渠道列表), AI 实际路由打通留批 channel 专项。
+// 判据: 商家渠道要真正驱动 AI 调用, 必须改成调 New-API channel API。
 func (s *MerchantService) CreateChannel(userID int, channelType int, key, name, group, modelList string, inputPrice, outputPrice float64) error {
 	var merchant models.Merchant
 	if err := s.db.Where("user_id = ?", userID).First(&merchant).Error; err != nil {
@@ -267,6 +276,8 @@ func (s *MerchantService) CreateChannel(userID int, channelType int, key, name, 
 		CreatedAt:   time.Now(),
 	}
 
+	// TODO(批channel专项): 改为 s.newAPIClient.CreateChannel(...) 走 New-API,
+	// 由其自动建 abilities + 刷新缓存, 使渠道真正参与 AI 路由。
 	return s.db.Create(&channel).Error
 }
 
