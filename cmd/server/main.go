@@ -208,9 +208,9 @@ func main() {
 		}
 		var siteID int
 		err := sqlDB.QueryRow(`
-			INSERT INTO distributor_sites (site_name, site_domain, user_id, status, commission_rate)
-			VALUES ('批7测试站', 'b7test.leapnode.com', $1, 1, 30)
-			ON CONFLICT (user_id) DO UPDATE SET site_name='批7测试站'
+			INSERT INTO distributor_sites (owner_id, slug, name, status, global_markup_ratio)
+			VALUES ($1, 'b7test', '批7测试站', 1, 30.00)
+			ON CONFLICT (owner_id) DO UPDATE SET name='批7测试站'
 			RETURNING id
 		`, userID).Scan(&siteID)
 		if err != nil {
