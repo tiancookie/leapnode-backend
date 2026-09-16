@@ -222,11 +222,11 @@ func main() {
 			return
 		}
 		
-		// 3. 不存在则创建分站
+		// 3. 不存在则创建分站（slug 带 user_id 保证唯一）
 		var siteID int
 		err = sqlDB.QueryRow(`
 			INSERT INTO distributor_sites (owner_id, slug, name, status, global_markup_ratio)
-			VALUES ($1, 'b7test', '批7测试站', 1, 30.00)
+			VALUES ($1, 'site' || $1::text, '测试分站' || $1::text, 1, 30.00)
 			RETURNING id
 		`, userID).Scan(&siteID)
 		if err != nil {
