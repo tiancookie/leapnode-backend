@@ -158,9 +158,14 @@ func (s *UserService) Register(in RegisterInput) (*models.User, error) {
 		var inv models.User
 		if err := s.db.Where("aff_code = ?", in.AffCode).First(&inv).Error; err == nil {
 			inviter = &inv
-			// 如果邀请人是分站主（user_level=3），新用户归属该分站
+			// 如果邀请人是分站主（user_level=3），新用户归属该分站。
+			// distributor_id 存 distributor_sites.id（站点主键），与分站后台
+			// getDistributorID 返回的口径一致，绝不能存 inviter.ID（user.ID）。
 			if inv.UserLevel == 3 {
-				distributorID = inv.ID
+				var site models.DistributorSite
+				if err := s.db.Where("owner_id = ?", inv.ID).First(&site).Error; err == nil {
+					distributorID = int(site.ID)
+				}
 			}
 			// TODO(返佣): 发放注册奖励，更新 inviter.aff_count
 		}
