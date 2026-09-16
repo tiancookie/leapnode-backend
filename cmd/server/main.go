@@ -238,6 +238,42 @@ func main() {
 		c.JSON(200, gin.H{"success": true, "site_id": siteID, "user_id": userID, "user_level": 3})
 	})
 
+	// 临时：初始化商家（POST /bootstrap/init-merchant?user_id=31）
+	router.POST("/bootstrap/init-merchant", func(c *gin.Context) {
+		userID := c.Query("user_id")
+		if userID == "" {
+			c.JSON(400, gin.H{"error": "user_id required"})
+			return
+		}
+		// 升级 user_level=2
+		if _, err := sqlDB.Exec(`UPDATE users SET user_level = 2 WHERE id = $1`, userID); err != nil {
+			c.JSON(500, gin.H{"error": "update user_level failed: " + err.Error()})
+			return
+		}
+		// 已存在则返回
+		var existingID int
+		if err := sqlDB.QueryRow(`SELECT id FROM merchants WHERE user_id = $1`, userID).Scan(&existingID); err == nil {
+			c.JSON(200, gin.H{"success": true, "merchant_id": existingID, "user_id": userID, "message": "已存在，user_level已更新为2"})
+			return
+		}
+		// 建 merchant 记录
+		var mid int
+		handle := "m" + userID
+		mname := "测试商家" + userID
+		err := sqlDB.QueryRow(`
+			INSERT INTO merchants (user_id, merchant_name, merchant_handle, merchant_level, commission_rate, status, created_at)
+			VALUES ($1, $2, $3, 'gold', 0.30, 1, NOW())
+			RETURNING id
+		`, userID, mname, handle).Scan(&mid)
+		if err != nil {
+			c.JSON(500, gin.H{"error": err.Error()})
+			return
+		}
+		// 回写 users.merchant_id
+		_, _ = sqlDB.Exec(`UPDATE users SET merchant_id = $1 WHERE id = $2`, mid, userID)
+		c.JSON(200, gin.H{"success": true, "merchant_id": mid, "user_id": userID, "user_level": 2})
+	})
+
 	go func() {
 		log.Printf("leapnode-backend listening on %s", httpAddr)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
