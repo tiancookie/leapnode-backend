@@ -3,6 +3,8 @@ package services
 
 import (
 	cryptorand "crypto/rand"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -1112,23 +1114,78 @@ func (s *DistributorService) GetRevenueRecords(distributorID int, page, pageSize
 
 // GetWithdrawalRecords 获取提现记录。
 func (s *DistributorService) GetWithdrawalRecords(distributorID int, page, pageSize int) ([]map[string]interface{}, int64, error) {
-	// TODO: 从 withdrawal_requests 表查询
-	// WHERE distributor_id = ?
-	return []map[string]interface{}{}, 0, nil
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 100 {
+		pageSize = 20
+	}
+	var total int64
+	s.db.Table("withdrawal_requests").Where("distributor_id = ?", distributorID).Count(&total)
+
+	var rows []map[string]interface{}
+	if err := s.db.Table("withdrawal_requests").
+		Where("distributor_id = ?", distributorID).
+		Order("created_at DESC").
+		Offset((page - 1) * pageSize).Limit(pageSize).
+		Find(&rows).Error; err != nil {
+		return nil, 0, err
+	}
+	return rows, total, nil
 }
 
 // RequestWithdrawal 申请提现。
+// 校验分站可提现余额（distributor_sites.balance），冻结不实际扣（等总站审核打款），
+// 只创建 withdrawal_requests 待审核记录。
 func (s *DistributorService) RequestWithdrawal(distributorID int, amount float64, paymentMethod, accountInfo string) (int64, error) {
-	// TODO: 检查可提现余额
-	// 创建 withdrawal_request 记录
-	return 0, errors.New("not implemented")
+	if amount <= 0 {
+		return 0, errors.New("提现金额必须大于0")
+	}
+
+	// 校验余额
+	var balance float64
+	if err := s.db.Table("distributor_sites").
+		Select("COALESCE(balance,0)").
+		Where("id = ?", distributorID).
+		Scan(&balance).Error; err != nil {
+		return 0, err
+	}
+	if balance < amount {
+		return 0, fmt.Errorf("可提现余额不足: 余额%.2f, 申请%.2f", balance, amount)
+	}
+
+	// 创建待审核提现记录
+	var id int64
+	if err := s.db.Raw(`
+		INSERT INTO withdrawal_requests (distributor_id, amount, payment_method, account_info, status, created_at)
+		VALUES (?, ?, ?, ?, 0, NOW())
+		RETURNING id
+	`, distributorID, amount, paymentMethod, accountInfo).Scan(&id).Error; err != nil {
+		return 0, err
+	}
+	return id, nil
 }
 
 // GetRechargeRecords 获取充值记录。
 func (s *DistributorService) GetRechargeRecords(distributorID int, page, pageSize int) ([]map[string]interface{}, int64, error) {
-	// TODO: 从 topup_orders 表查询
-	// WHERE distributor_id = ?
-	return []map[string]interface{}{}, 0, nil
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 100 {
+		pageSize = 20
+	}
+	var total int64
+	s.db.Table("topup_orders").Where("distributor_id = ?", distributorID).Count(&total)
+
+	var rows []map[string]interface{}
+	if err := s.db.Table("topup_orders").
+		Where("distributor_id = ?", distributorID).
+		Order("created_at DESC").
+		Offset((page - 1) * pageSize).Limit(pageSize).
+		Find(&rows).Error; err != nil {
+		return nil, 0, err
+	}
+	return rows, total, nil
 }
 
 // ========== 11. 站点与开发 - 站点设置 ==========
@@ -1143,16 +1200,64 @@ type SiteSettings struct {
 	SEOKeywords     string `json:"seo_keywords"`
 }
 
-// GetSiteSettings 获取站点配置。
+// GetSiteSettings 获取站点配置（从 distributor_sites 表）。
 func (s *DistributorService) GetSiteSettings(distributorID int) (*SiteSettings, error) {
-	// TODO: 从 distributor_settings 表查询
-	return &SiteSettings{}, nil
+	var row struct {
+		Name           string
+		LogoURL        string
+		CustomDomain   string
+		SeoTitle       string
+		SeoDescription string
+		SeoKeywords    string
+	}
+	if err := s.db.Table("distributor_sites").
+		Select("name, logo_url, custom_domain, seo_title, seo_description, seo_keywords").
+		Where("id = ?", distributorID).
+		Scan(&row).Error; err != nil {
+		return nil, err
+	}
+	return &SiteSettings{
+		SiteName:       row.Name,
+		SiteLogo:       row.LogoURL,
+		CustomDomain:   row.CustomDomain,
+		SEOTitle:       row.SeoTitle,
+		SEODescription: row.SeoDescription,
+		SEOKeywords:    row.SeoKeywords,
+	}, nil
 }
 
-// UpdateSiteSettings 更新站点配置。
+// UpdateSiteSettings 更新站点配置（只更新非空字段，写 distributor_sites）。
 func (s *DistributorService) UpdateSiteSettings(distributorID int, settings *SiteSettings) error {
-	// TODO: 更新 distributor_settings 表
-	return errors.New("not implemented")
+	updates := map[string]interface{}{}
+	if settings.SiteName != "" {
+		updates["name"] = settings.SiteName
+	}
+	if settings.SiteLogo != "" {
+		updates["logo_url"] = settings.SiteLogo
+	}
+	if settings.CustomDomain != "" {
+		updates["custom_domain"] = settings.CustomDomain
+	}
+	if settings.SEOTitle != "" {
+		updates["seo_title"] = settings.SEOTitle
+	}
+	if settings.SEODescription != "" {
+		updates["seo_description"] = settings.SEODescription
+	}
+	if settings.SEOKeywords != "" {
+		updates["seo_keywords"] = settings.SEOKeywords
+	}
+	if len(updates) == 0 {
+		return nil
+	}
+	res := s.db.Table("distributor_sites").Where("id = ?", distributorID).Updates(updates)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return errors.New("分站不存在或无权限")
+	}
+	return nil
 }
 
 // PaymentMethodConfig 支付方式配置。
@@ -1162,16 +1267,55 @@ type PaymentMethodConfig struct {
 	Config  map[string]interface{} `json:"config"`
 }
 
-// GetPaymentMethods 获取支付方式配置。
+// GetPaymentMethods 获取支付方式配置（从 distributor_payment_configs 表）。
 func (s *DistributorService) GetPaymentMethods(distributorID int) ([]PaymentMethodConfig, error) {
-	// TODO: 从 distributor_payment_configs 表查询
-	return []PaymentMethodConfig{}, nil
+	var rows []struct {
+		PaymentType string
+		Enabled     bool
+		Config      string
+	}
+	if err := s.db.Table("distributor_payment_configs").
+		Select("payment_type, enabled, config").
+		Where("distributor_id = ?", distributorID).
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := make([]PaymentMethodConfig, 0, len(rows))
+	for _, r := range rows {
+		cfg := map[string]interface{}{}
+		if r.Config != "" {
+			_ = json.Unmarshal([]byte(r.Config), &cfg)
+		}
+		out = append(out, PaymentMethodConfig{Type: r.PaymentType, Enabled: r.Enabled, Config: cfg})
+	}
+	return out, nil
 }
 
-// UpdatePaymentMethods 更新支付配置。
+// UpdatePaymentMethods 更新支付配置（upsert 到 distributor_payment_configs）。
 func (s *DistributorService) UpdatePaymentMethods(distributorID int, methods []PaymentMethodConfig) error {
-	// TODO: 更新 distributor_payment_configs 表
-	return errors.New("not implemented")
+	if len(methods) == 0 {
+		return errors.New("无支付方式配置")
+	}
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		for _, m := range methods {
+			cfgJSON := "{}"
+			if m.Config != nil {
+				if b, err := json.Marshal(m.Config); err == nil {
+					cfgJSON = string(b)
+				}
+			}
+			// upsert：唯一键 (distributor_id, payment_type)
+			if err := tx.Exec(`
+				INSERT INTO distributor_payment_configs (distributor_id, payment_type, enabled, config, created_at, updated_at)
+				VALUES (?, ?, ?, ?, NOW(), NOW())
+				ON CONFLICT (distributor_id, payment_type)
+				DO UPDATE SET enabled = EXCLUDED.enabled, config = EXCLUDED.config, updated_at = NOW()
+			`, distributorID, m.Type, m.Enabled, cfgJSON).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 // ========== 12. 站点与开发 - API密钥 ==========
@@ -1185,20 +1329,74 @@ type APIKey struct {
 	LastUsed  string `json:"last_used"`
 }
 
-// GetAPIKeys 获取分站API密钥列表。
+// GetAPIKeys 获取分站API密钥列表（从 distributor_api_keys 表）。
 func (s *DistributorService) GetAPIKeys(distributorID int) ([]APIKey, error) {
-	// TODO: 从 distributor_api_keys 表查询
-	return []APIKey{}, nil
+	var rows []struct {
+		ID         int
+		Name       string
+		APIKey     string
+		CreatedAt  *time.Time
+		LastUsedAt *time.Time
+	}
+	if err := s.db.Table("distributor_api_keys").
+		Select("id, name, api_key, created_at, last_used_at").
+		Where("distributor_id = ?", distributorID).
+		Order("created_at DESC").
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := make([]APIKey, 0, len(rows))
+	for _, r := range rows {
+		created, lastUsed := "", ""
+		if r.CreatedAt != nil {
+			created = r.CreatedAt.Format("2006-01-02 15:04:05")
+		}
+		if r.LastUsedAt != nil {
+			lastUsed = r.LastUsedAt.Format("2006-01-02 15:04:05")
+		}
+		// 密钥脱敏：只回显前12位
+		masked := r.APIKey
+		if len(masked) > 12 {
+			masked = masked[:12] + "..."
+		}
+		out = append(out, APIKey{ID: r.ID, KeyName: r.Name, KeyValue: masked, CreatedAt: created, LastUsed: lastUsed})
+	}
+	return out, nil
 }
 
-// GenerateAPIKey 生成新密钥。
+// GenerateAPIKey 生成新密钥（格式 ln-{32位hex}，明文只在创建时返回一次）。
 func (s *DistributorService) GenerateAPIKey(distributorID int, keyName string) (*APIKey, error) {
-	// TODO: 生成随机密钥，插入 distributor_api_keys 表
-	return nil, errors.New("not implemented")
+	if keyName == "" {
+		keyName = "API Key"
+	}
+	b := make([]byte, 24)
+	if _, err := cryptorand.Read(b); err != nil {
+		return nil, err
+	}
+	key := "ln-" + hex.EncodeToString(b)
+
+	var id int
+	if err := s.db.Raw(`
+		INSERT INTO distributor_api_keys (distributor_id, name, api_key, status, created_at)
+		VALUES (?, ?, ?, 1, NOW())
+		RETURNING id
+	`, distributorID, keyName, key).Scan(&id).Error; err != nil {
+		return nil, err
+	}
+	// 创建时返回完整明文 key（唯一一次）
+	return &APIKey{ID: id, KeyName: keyName, KeyValue: key, CreatedAt: time.Now().Format("2006-01-02 15:04:05")}, nil
 }
 
-// DeleteAPIKey 删除密钥。
+// DeleteAPIKey 删除密钥（校验归属）。
 func (s *DistributorService) DeleteAPIKey(distributorID, keyID int) error {
-	// TODO: 删除 distributor_api_keys 表记录
-	return errors.New("not implemented")
+	res := s.db.Table("distributor_api_keys").
+		Where("id = ? AND distributor_id = ?", keyID, distributorID).
+		Delete(nil)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return errors.New("密钥不存在或无权限")
+	}
+	return nil
 }

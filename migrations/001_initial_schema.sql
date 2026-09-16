@@ -520,4 +520,22 @@ CREATE INDEX IF NOT EXISTS idx_channel_group_relations_group   ON channel_group_
 CREATE INDEX IF NOT EXISTS idx_channel_group_relations_channel ON channel_group_relations(channel_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_channel_group_relations_unique ON channel_group_relations(group_id, channel_id);
 
+-- =============================================================================
+-- PART 10: 分站提现申请表 (批7)
+--   分站发起提现，总站审核。金额单位与 distributor_sites.balance 一致（元）。
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS withdrawal_requests (
+    id             SERIAL PRIMARY KEY,
+    distributor_id INT           NOT NULL,             -- distributor_sites.id
+    amount         DECIMAL(12,2) NOT NULL,
+    payment_method VARCHAR(20),                        -- alipay/usdt/bank
+    account_info   VARCHAR(255),                       -- 收款账号
+    status         INT           DEFAULT 0,            -- 0=待审核 1=已打款 2=已拒绝
+    admin_remark   VARCHAR(255),
+    created_at     TIMESTAMP     DEFAULT NOW(),
+    processed_at   TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_withdrawal_requests_dist   ON withdrawal_requests(distributor_id);
+CREATE INDEX IF NOT EXISTS idx_withdrawal_requests_status ON withdrawal_requests(status);
+
 COMMIT;
