@@ -545,28 +545,32 @@ func (s *AdminService) GetOfficialChannels(page, pageSize int) (*ChannelListResu
 
 // CreateChannelInput 创建渠道参数。
 type CreateChannelInput struct {
-	Type   int     `json:"type" binding:"required"`
-	Key    string  `json:"key" binding:"required"`
-	Name   string  `json:"name" binding:"required"`
-	Models string  `json:"models"`
-	Status int     `json:"status"`
-	Group  string  `json:"group"`
+	Type    int    `json:"type" binding:"required"`
+	Key     string `json:"key" binding:"required"`
+	Name    string `json:"name" binding:"required"`
+	BaseURL string `json:"base_url"`
+	Models  string `json:"models"`
+	Status  int    `json:"status"`
+	Group   string `json:"group"`
 }
 
 // CreateOfficialChannel 创建总站官方渠道。
+// 走 New-API POST /api/channel/（同建 channels+abilities+驱动 AI 路由），
+// 不再直接写库。官方渠道 merchant_id 保持 NULL。
 func (s *AdminService) CreateOfficialChannel(input CreateChannelInput) error {
-	channel := models.Channel{
-		Type:        input.Type,
-		Key:         input.Key,
-		Name:        input.Name,
-		Models:      input.Models,
-		Status:      input.Status,
-		Group:       input.Group,
-		MerchantID:  nil, // 总站官方渠道
-		CreatedTime: time.Now().Unix(),
+	if s.newAPIClient == nil {
+		return errors.New("newAPIClient 未注入，无法创建渠道")
 	}
-
-	return s.db.Create(&channel).Error
+	group := input.Group
+	if group == "" {
+		group = "default"
+	}
+	// New-API 建 channel（会自动建 abilities）
+	_, err := s.newAPIClient.CreateChannel(input.Name, input.Key, input.BaseURL, input.Models, group, input.Type)
+	if err != nil {
+		return fmt.Errorf("New-API 建官方渠道失败: %w", err)
+	}
+	return nil
 }
 
 // UpdateChannelInput 更新渠道参数。
@@ -579,6 +583,11 @@ type UpdateChannelInput struct {
 }
 
 // UpdateChannel 更新渠道。
+//
+// ⚠️ 路由风险(批9标注): 若更新 models 字段, New-API 的 abilities 表不会自动同步,
+// 会导致新增/删除的模型路由不生效。当前只支持改 key/name/status/group(不影响路由);
+// 改 models 的正确做法是删旧渠道重建(走 New-API), 或调 New-API PUT /api/channel/。
+// TODO: models 变更时改走 New-API PUT + UpdateChannelStatus。
 func (s *AdminService) UpdateChannel(channelID int, input UpdateChannelInput) error {
 	updates := make(map[string]interface{})
 
@@ -607,9 +616,22 @@ func (s *AdminService) UpdateChannel(channelID int, input UpdateChannelInput) er
 		Updates(updates).Error
 }
 
-// DeleteChannel 删除渠道。
+// DeleteChannel 删除官方渠道（走 New-API，级联删 abilities+刷新缓存）。
 func (s *AdminService) DeleteChannel(channelID int) error {
-	return s.db.Where("id = ? AND merchant_id IS NULL", channelID).Delete(&models.Channel{}).Error
+	// 校验是官方渠道（merchant_id IS NULL），防误删商家渠道
+	var cnt int64
+	if err := s.db.Model(&models.Channel{}).
+		Where("id = ? AND merchant_id IS NULL", channelID).
+		Count(&cnt).Error; err != nil {
+		return err
+	}
+	if cnt == 0 {
+		return errors.New("官方渠道不存在")
+	}
+	if s.newAPIClient == nil {
+		return errors.New("newAPIClient 未注入，无法删除渠道")
+	}
+	return s.newAPIClient.DeleteChannel(channelID)
 }
 
 // ========== 6. 套餐管理（总站套餐）==========
