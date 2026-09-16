@@ -347,5 +347,15 @@ func runMigrations(db *sql.DB) error {
 		log.Printf("warning: failed to add description column (may already exist): %v", err)
 	}
 	
+	// 补充 affiliate_earnings 缺失列（批10返佣系统需要）
+	_, err = db.Exec("ALTER TABLE affiliate_earnings ADD COLUMN IF NOT EXISTS event_type VARCHAR(20) DEFAULT 'consumption';")
+	if err != nil {
+		log.Printf("warning: failed to add event_type column: %v", err)
+	}
+	_, err = db.Exec("ALTER TABLE affiliate_earnings ADD COLUMN IF NOT EXISTS status INT DEFAULT 1;")
+	if err != nil {
+		log.Printf("warning: failed to add status column: %v", err)
+	}
+	
 	return nil
 }
