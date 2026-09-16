@@ -284,6 +284,7 @@ func (ctrl *MerchantController) CreateChannel(c *gin.Context) {
 		Key         string  `json:"key" binding:"required"`
 		Name        string  `json:"name" binding:"required"`
 		Group       string  `json:"group"`
+		BaseURL     string  `json:"base_url"`
 		Models      string  `json:"models" binding:"required"`
 		InputPrice  float64 `json:"input_price" binding:"required"`
 		OutputPrice float64 `json:"output_price" binding:"required"`
@@ -294,7 +295,7 @@ func (ctrl *MerchantController) CreateChannel(c *gin.Context) {
 		return
 	}
 
-	err := ctrl.merchantService.CreateChannel(userID, req.Type, req.Key, req.Name, req.Group, req.Models, req.InputPrice, req.OutputPrice)
+	err := ctrl.merchantService.CreateChannel(userID, req.Type, req.Key, req.Name, req.Group, req.BaseURL, req.Models, req.InputPrice, req.OutputPrice)
 	if err != nil {
 		utils.ErrorJSON(c, http.StatusInternalServerError, err.Error())
 		return

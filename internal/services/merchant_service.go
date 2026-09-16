@@ -257,7 +257,7 @@ func (s *MerchantService) GetChannels(userID int) ([]models.Channel, error) {
 // 正确做法: 走 New-API POST /api/channel (它同时处理 channels+abilities+缓存)。
 // 当前先保留直接写库 (管理后台能看到渠道列表), AI 实际路由打通留批 channel 专项。
 // 判据: 商家渠道要真正驱动 AI 调用, 必须改成调 New-API channel API。
-func (s *MerchantService) CreateChannel(userID int, channelType int, key, name, group, modelList string, inputPrice, outputPrice float64) error {
+func (s *MerchantService) CreateChannel(userID int, channelType int, key, name, group, baseURL, modelList string, inputPrice, outputPrice float64) error {
 	var merchant models.Merchant
 	if err := s.db.Where("user_id = ?", userID).First(&merchant).Error; err != nil {
 		return fmt.Errorf("merchant not found: %w", err)
@@ -269,12 +269,10 @@ func (s *MerchantService) CreateChannel(userID int, channelType int, key, name, 
 	}
 
 	// 1. 通过 New-API 建 channel（它会同建 channels + abilities，驱动 AI 路由）。
-	//    base_url 走 New-API 默认（OpenAI 兼容渠道由 New-API 按 type 填默认），
-	//    这里商家渠道默认空 base_url 用官方端点；如需自定义上游可扩展入参。
 	if s.newAPIClient == nil {
 		return fmt.Errorf("newAPIClient 未注入，无法创建渠道")
 	}
-	channelID, err := s.newAPIClient.CreateChannel(name, key, "", modelList, group, channelType)
+	channelID, err := s.newAPIClient.CreateChannel(name, key, baseURL, modelList, group, channelType)
 	if err != nil {
 		return fmt.Errorf("New-API 建渠道失败: %w", err)
 	}
