@@ -13,12 +13,12 @@
 - **依赖**：需要老大+龙龙定价策略（成本价 × 加价倍率）。
 - **风险**：不配价直接开自用模式 = 所有调用不计费，商业模式失效。
 
-### 2. admin / distributor 渠道 CRUD 改走 New-API
-- **现状**：批8 只打通了 **merchant** 渠道 CRUD（走 New-API 建 channels+abilities）。
-- **未做**：
-  - `admin` 官方渠道 CRUD（admin_service.go CreateOfficialChannel/UpdateChannel/DeleteChannel）仍直接写库
-  - `distributor` 选品落 abilities（distributor 启用模型时应确保对应 channel 的 abilities 生效）
-- **判据**：这两个不接，官方渠道和分站选品的模型对 AI 路由仍"隐形"。
+### 2. admin / distributor 渠道 CRUD 改走 New-API ✅ 批9完成
+- **merchant** 渠道 CRUD：批8 已走 New-API ✅
+- **admin** 官方渠道：批9 已改 Create/Delete 走 New-API ✅；Update 的 models 变更仍待接 New-API PUT（已加风险标注，改 key/name/status 不影响路由）
+- **distributor** 选品：批9 确认不建 channel，靠上游商家/官方渠道的 abilities 路由，无需改代码 ✅
+- **真机验证**：官方渠道建立成功，New-API 日志坐实 glm-5.2→channel 2 路由计费成功。
+- **遗留**：admin UpdateChannel 改 models 时需走 New-API PUT + abilities 重建（低频场景，已标注 TODO）。
 
 ### 3. New-API 上游账号换高配
 - **现状**：x5m5x 免费/低配账号并发限制严（测试时频繁 429 gateway_concurrency_limit）。
