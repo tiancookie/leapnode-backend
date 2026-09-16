@@ -44,7 +44,7 @@ func (c *NewAPIClient) CreateChannel(name, key, baseURL, models, group string, c
 	}
 
 	reqBody := addChannelRequest{
-		Mode: "",
+		Mode: "single",
 		Channel: newAPIChannel{
 			Type:    channelType,
 			Name:    name,
