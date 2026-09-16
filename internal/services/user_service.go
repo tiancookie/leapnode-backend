@@ -4,6 +4,7 @@ package services
 import (
 	"crypto/rand"
 	"errors"
+	"fmt"
 	"math/big"
 	"regexp"
 	"strings"
@@ -104,18 +105,25 @@ func toResponse(u *models.User) *UserResponse {
 }
 
 // RegisterInput 注册参数 (对齐 Register.jsx 提交字段)。
+// 邀请码兼容两个字段名: aff_code (前端表单) 与 ref (邀请 URL /register?ref=CODE)。
 type RegisterInput struct {
 	Username         string `json:"username"`
 	Password         string `json:"password"`
 	Email            string `json:"email"`
 	VerificationCode string `json:"verification_code"`
 	AffCode          string `json:"aff_code"`
+	Ref              string `json:"ref"` // 批10：邀请 URL 的 ref 参数（aff_code 别名）
 }
 
 // Register 创建新用户。
 func (s *UserService) Register(in RegisterInput) (*models.User, error) {
 	username := strings.TrimSpace(in.Username)
 	email := strings.TrimSpace(strings.ToLower(in.Email))
+
+	// 邀请码兼容: 优先 aff_code，其次 ref（邀请链接参数）。
+	if in.AffCode == "" && in.Ref != "" {
+		in.AffCode = in.Ref
+	}
 
 	// --- 输入校验 (注册接口对外无认证, 必须严格校验) ---
 	if !usernameRe.MatchString(username) {
@@ -150,7 +158,7 @@ func (s *UserService) Register(in RegisterInput) (*models.User, error) {
 		}
 	}
 
-	// --- aff_code 归因（批7补完）---
+	// --- aff_code 归因（批7补完 + 批10补充注册返佣）---
 	// 1. 查找邀请人
 	var inviter *models.User
 	var distributorID int = 0 // 默认总站用户
@@ -167,7 +175,6 @@ func (s *UserService) Register(in RegisterInput) (*models.User, error) {
 					distributorID = int(site.ID)
 				}
 			}
-			// TODO(返佣): 发放注册奖励，更新 inviter.aff_count
 		}
 		// 推广码无效不报错（允许用户随便填），只是不归因
 	}
@@ -202,6 +209,16 @@ func (s *UserService) Register(in RegisterInput) (*models.User, error) {
 	}
 	if err := s.db.Save(&user).Error; err != nil {
 		return nil, err
+	}
+
+	// --- 批10补充：触发注册返佣 ---
+	// user 已 Save（数据已落库），此处同步发放注册奖励。
+	// 防重复由 GrantRegisterReward 内部保证；失败仅记日志，不回滚注册。
+	if inviter != nil {
+		affService := NewAffService(s.db, s.newAPIClient)
+		if err := affService.GrantRegisterReward(inviter.ID, user.ID); err != nil {
+			fmt.Printf("Failed to grant register reward: inviter=%d, invitee=%d, err=%v\n", inviter.ID, user.ID, err)
+		}
 	}
 
 	return &user, nil

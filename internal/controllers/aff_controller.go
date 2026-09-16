@@ -185,3 +185,31 @@ func (ctrl *AffController) GetKOLStatus(c *gin.Context) {
 
 	utils.SuccessJSON(c, data)
 }
+
+// GetAffStats GET /api/dist/aff/stats - 用户/分站自己的返佣统计（批10）
+func (ctrl *AffController) GetAffStats(c *gin.Context) {
+	userID, ok := middleware.CurrentUserID(c)
+	if !ok {
+		utils.ErrorJSON(c, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	data, err := ctrl.affService.GetAffStats(userID)
+	if err != nil {
+		utils.ErrorJSON(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	utils.SuccessJSON(c, data)
+}
+
+// GetAffOverview GET /api/admin/aff/overview - 平台级返佣大盘（批10，admin）
+func (ctrl *AffController) GetAffOverview(c *gin.Context) {
+	data, err := ctrl.affService.GetAffOverview()
+	if err != nil {
+		utils.ErrorJSON(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	utils.SuccessJSON(c, data)
+}

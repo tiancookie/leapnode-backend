@@ -95,6 +95,7 @@ func main() {
 
 	affService := services.NewAffService(db, newAPIClient)
 	affController := controllers.NewAffController(affService)
+	adminWithdrawalController := controllers.NewAdminWithdrawalController(affService)
 
 	adminService := services.NewAdminService(db, newAPIClient)
 	adminController := controllers.NewAdminController(adminService)
@@ -150,6 +151,7 @@ func main() {
 			affProtected.POST("/aff_withdraw", affController.RequestWithdraw)
 			affProtected.GET("/aff_payouts", affController.GetAffPayouts)
 			affProtected.GET("/aff/invitees", affController.GetInvitees)
+			affProtected.GET("/aff/stats", affController.GetAffStats) // 批10：用户返佣统计
 			affProtected.POST("/kol_apply", affController.ApplyKOL)
 			affProtected.GET("/kol_status", affController.GetKOLStatus)
 		}
@@ -176,6 +178,12 @@ func main() {
 	admin.Use(middleware.AdminAuth())
 	{
 		adminController.RegisterRoutes(admin)
+
+		// 批10：提现审批（列表/通过/拒绝）
+		adminWithdrawalController.RegisterRoutes(admin)
+
+		// 批10：平台级返佣大盘
+		admin.GET("/aff/overview", affController.GetAffOverview)
 	}
 
 	// 商家中心: /api/merchant/* (需要 AuthRequired + MerchantAuth)

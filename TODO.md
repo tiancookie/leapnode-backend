@@ -46,6 +46,33 @@
 
 ---
 
+## 批10 — 返佣系统（商业闭环最后一块）
+
+### 10.1 返佣规则配置
+- **现状**：一级/二级返佣比例硬编码或未配置。
+- **要做**：admin 可配置一级/二级返佣比例（aff_settings 表或配置文件），默认值：一级 10%、二级 5%。
+
+### 10.2 返佣自动触发
+- **现状**：aff_service.go 已有 GrantRegisterReward/GrantFirstTopupReward 方法，但未挂到注册/充值流程。
+- **要做**：
+  1. 注册时：若有 ref 参数，写 users.inviter_id + 触发 GrantRegisterReward（给邀请人固定奖励 $0.5）
+  2. 首充时：查 inviter_id，若存在触发 GrantFirstTopupReward（一级 10% + 二级 5%）
+  3. 防重复：用 aff_history.event_type 去重（同一 invitee_id + register/first_topup 只记录一次）
+
+### 10.3 admin 提现审批
+- **现状**：用户提现申请已写 withdrawal_requests 表（status=0 pending）。
+- **要做**：
+  1. `GET /api/admin/withdrawals` — 查询待审核列表（分页，含用户名/金额/提现方式/申请时间）
+  2. `PUT /api/admin/withdrawals/:id/approve` — 通过（扣用户 aff_quota + 更新 status=1 + 记录 aff_history.withdraw + 备注打款时间）
+  3. `PUT /api/admin/withdrawals/:id/reject` — 拒绝（更新 status=2 + 填写拒绝原因 admin_remark）
+
+### 10.4 返佣统计看板
+- **要做**：
+  1. `GET /api/dist/aff/stats` — 分站/用户自己的返佣统计（总收益/可提现余额/已提现/一级邀请人数/二级邀请人数/本月新增）
+  2. `GET /api/admin/aff/overview` — 平台级返佣大盘（总发放金额/待提现金额/提现申请数/活跃邀请人数 TOP10）
+
+---
+
 ## P2 — 安全 / 收尾（上线后可迭代）
 
 ### 8. 删除临时 bootstrap 端点

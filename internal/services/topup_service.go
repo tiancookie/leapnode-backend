@@ -647,7 +647,14 @@ func (s *TopupService) ClaimCryptoOrderTransfer(userID int, in ClaimCryptoInput)
 // TODO(parent): 由真实链上对账或后台审核触发; 本批 4 接口暂不自动调用
 // (无链上数据源), 保留为可复用的到账入账入口。
 func (s *TopupService) ConfirmCryptoOrderPaid(tradeNo, txHash string) error {
-	return s.db.Transaction(func(tx *gorm.DB) error {
+	// isFirstTopup / topupUserID / topupAmount 在事务内确定，事务提交成功后再触发首充返佣。
+	// 之所以在事务外触发：GrantFirstTopupReward 用 s.db 读写，需读到已提交的 topup_orders 行，
+	// 否则会与未提交的事务产生可见性竞态。
+	var isFirstTopup bool
+	var topupUserID int
+	var topupAmount float64
+
+	txErr := s.db.Transaction(func(tx *gorm.DB) error {
 		var order models.CryptoTopupOrder
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 			Where("trade_no = ?", tradeNo).First(&order).Error; err != nil {
@@ -705,6 +712,35 @@ func (s *TopupService) ConfirmCryptoOrderPaid(tradeNo, txHash string) error {
 			return err
 		}
 
+		// --- 批10补充：检测首充（topup_orders 表中 status=1 的订单数）---
+		var topupCount int64
+		if err := tx.Model(&models.TopupOrder{}).
+			Where("user_id = ? AND status = 1", order.UserID).
+			Count(&topupCount).Error; err != nil {
+			return err
+		}
+		// 刚写入的这条是唯一一条 => 首充
+		if topupCount == 1 {
+			isFirstTopup = true
+			topupUserID = order.UserID
+			topupAmount = order.PayAmount
+		}
+
 		return nil
 	})
+
+	if txErr != nil {
+		return txErr
+	}
+
+	// --- 批10补充：事务提交后触发首充返佣（防重复由 GrantFirstTopupReward 内部保证）---
+	if isFirstTopup {
+		affService := NewAffService(s.db, s.newAPIClient)
+		if err := affService.GrantFirstTopupReward(topupUserID, topupAmount); err != nil {
+			// 记录日志但不阻塞充值主流程（quota 已到账）
+			fmt.Printf("Failed to grant first topup reward: user=%d, amount=%.2f, err=%v\n", topupUserID, topupAmount, err)
+		}
+	}
+
+	return nil
 }
