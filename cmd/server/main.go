@@ -199,8 +199,22 @@ func main() {
 		Handler: router,
 	}
 
-	// 临时：初始化分站（POST /bootstrap/init-dist?user_id=24）
+	// 临时 bootstrap 端点（测试用，需 ?secret=$BOOTSTRAP_SECRET 保护）。
+	// BOOTSTRAP_SECRET 未设置时端点整体关闭，避免裸后门。
+	bootstrapSecret := os.Getenv("BOOTSTRAP_SECRET")
+	bootstrapGuard := func(c *gin.Context) bool {
+		if bootstrapSecret == "" || c.Query("secret") != bootstrapSecret {
+			c.JSON(403, gin.H{"error": "forbidden"})
+			return false
+		}
+		return true
+	}
+
+	// 临时：初始化分站（POST /bootstrap/init-dist?user_id=24&secret=xxx）
 	router.POST("/bootstrap/init-dist", func(c *gin.Context) {
+		if !bootstrapGuard(c) {
+			return
+		}
 		userID := c.Query("user_id")
 		if userID == "" {
 			c.JSON(400, gin.H{"error": "user_id required"})
@@ -238,8 +252,11 @@ func main() {
 		c.JSON(200, gin.H{"success": true, "site_id": siteID, "user_id": userID, "user_level": 3})
 	})
 
-	// 临时：初始化商家（POST /bootstrap/init-merchant?user_id=31）
+	// 临时：初始化商家（POST /bootstrap/init-merchant?user_id=31&secret=xxx）
 	router.POST("/bootstrap/init-merchant", func(c *gin.Context) {
+		if !bootstrapGuard(c) {
+			return
+		}
 		userID := c.Query("user_id")
 		if userID == "" {
 			c.JSON(400, gin.H{"error": "user_id required"})
