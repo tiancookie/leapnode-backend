@@ -99,7 +99,7 @@ func main() {
 	adminService := services.NewAdminService(db, newAPIClient)
 	adminController := controllers.NewAdminController(adminService)
 
-	merchantService := services.NewMerchantService(db)
+	merchantService := services.NewMerchantService(db, newAPIClient)
 	merchantController := controllers.NewMerchantController(merchantService)
 
 	distributorService := services.NewDistributorService(db, newAPIClient)

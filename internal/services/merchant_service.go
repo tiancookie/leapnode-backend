@@ -14,12 +14,13 @@ import (
 
 // MerchantService 商家中心业务逻辑。
 type MerchantService struct {
-	db *gorm.DB
+	db           *gorm.DB
+	newAPIClient *NewAPIClient
 }
 
 // NewMerchantService 创建 MerchantService。
-func NewMerchantService(db *gorm.DB) *MerchantService {
-	return &MerchantService{db: db}
+func NewMerchantService(db *gorm.DB, newAPIClient *NewAPIClient) *MerchantService {
+	return &MerchantService{db: db, newAPIClient: newAPIClient}
 }
 
 // MerchantDashboardStats 商家首页统计数据。
@@ -261,24 +262,37 @@ func (s *MerchantService) CreateChannel(userID int, channelType int, key, name, 
 	if err := s.db.Where("user_id = ?", userID).First(&merchant).Error; err != nil {
 		return fmt.Errorf("merchant not found: %w", err)
 	}
-
 	merchantID := int(merchant.ID)
-	channel := models.Channel{
-		Type:        channelType,
-		Key:         key,
-		Name:        name,
-		Group:       group,
-		Models:      modelList,
-		Status:      1,
-		MerchantID:  &merchantID,
-		InputPrice:  &inputPrice,
-		OutputPrice: &outputPrice,
-		CreatedTime: time.Now().Unix(),
+
+	if group == "" {
+		group = "default"
 	}
 
-	// TODO(批channel专项): 改为 s.newAPIClient.CreateChannel(...) 走 New-API,
-	// 由其自动建 abilities + 刷新缓存, 使渠道真正参与 AI 路由。
-	return s.db.Create(&channel).Error
+	// 1. 通过 New-API 建 channel（它会同建 channels + abilities，驱动 AI 路由）。
+	//    base_url 走 New-API 默认（OpenAI 兼容渠道由 New-API 按 type 填默认），
+	//    这里商家渠道默认空 base_url 用官方端点；如需自定义上游可扩展入参。
+	if s.newAPIClient == nil {
+		return fmt.Errorf("newAPIClient 未注入，无法创建渠道")
+	}
+	channelID, err := s.newAPIClient.CreateChannel(name, key, "", modelList, group, channelType)
+	if err != nil {
+		return fmt.Errorf("New-API 建渠道失败: %w", err)
+	}
+
+	// 2. 回写 LeapNode 扩展字段到同一行（merchant_id / 成本价）。
+	//    channels 由 New-API 独占写，这里只 UPDATE 扩展列，不碰 New-API 管的字段。
+	if err := s.db.Model(&models.Channel{}).
+		Where("id = ?", channelID).
+		Updates(map[string]interface{}{
+			"merchant_id":  merchantID,
+			"input_price":  inputPrice,
+			"output_price": outputPrice,
+		}).Error; err != nil {
+		// 扩展字段回写失败不影响渠道可用（AI 路由已生效），仅记录
+		return fmt.Errorf("渠道已建(id=%d)但回写商家扩展字段失败: %w", channelID, err)
+	}
+
+	return nil
 }
 
 // UpdateChannel 更新渠道。
@@ -312,24 +326,31 @@ func (s *MerchantService) UpdateChannel(userID int, channelID int, key, name, gr
 	return nil
 }
 
-// DeleteChannel 删除渠道。
+// DeleteChannel 删除渠道（走 New-API，同步删 channels+abilities+刷新缓存）。
 func (s *MerchantService) DeleteChannel(userID int, channelID int) error {
 	var merchant models.Merchant
 	if err := s.db.Where("user_id = ?", userID).First(&merchant).Error; err != nil {
 		return fmt.Errorf("merchant not found: %w", err)
 	}
 
-	result := s.db.Where("id = ? AND merchant_id = ?", channelID, merchant.ID).
-		Delete(&models.Channel{})
-
-	if result.Error != nil {
-		return result.Error
+	// 归属校验：该 channel 必须属于当前商家（防越权删别人的渠道）
+	var cnt int64
+	if err := s.db.Model(&models.Channel{}).
+		Where("id = ? AND merchant_id = ?", channelID, merchant.ID).
+		Count(&cnt).Error; err != nil {
+		return err
 	}
-
-	if result.RowsAffected == 0 {
+	if cnt == 0 {
 		return fmt.Errorf("channel not found")
 	}
 
+	if s.newAPIClient == nil {
+		return fmt.Errorf("newAPIClient 未注入，无法删除渠道")
+	}
+	// New-API 删 channel 会级联删 abilities 并刷新路由缓存
+	if err := s.newAPIClient.DeleteChannel(channelID); err != nil {
+		return fmt.Errorf("New-API 删渠道失败: %w", err)
+	}
 	return nil
 }
 
