@@ -87,7 +87,7 @@ func main() {
 	userService := services.NewUserService(db, newAPIClient)
 	userController := controllers.NewUserController(userService)
 
-	tokenService := services.NewTokenService(db)
+	tokenService := services.NewTokenService(db, newAPIClient)
 	tokenController := controllers.NewTokenController(tokenService, siteService)
 
 	topupService := services.NewTopupService(db, newAPIClient)

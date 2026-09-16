@@ -17,12 +17,16 @@ import (
 // 所有操作均以 userID 归属校验为前提, 防止越权操作他人 token。
 // 复用 New-API 原生 tokens 表 (models.Token), 只做 CRUD, 不改列/不 AutoMigrate。
 type TokenService struct {
-	db *gorm.DB
+	db            *gorm.DB
+	newAPIClient  *NewAPIClient
 }
 
 // NewTokenService 创建 TokenService。
-func NewTokenService(db *gorm.DB) *TokenService {
-	return &TokenService{db: db}
+func NewTokenService(db *gorm.DB, newAPIClient *NewAPIClient) *TokenService {
+	return &TokenService{
+		db:           db,
+		newAPIClient: newAPIClient,
+	}
 }
 
 // 业务错误 (由 controller 映射为 message + 状态码)。
@@ -201,8 +205,7 @@ func (s *TokenService) CreateToken(userID int, in CreateTokenInput) (*models.Tok
 // UpdateToken 更新归属于 userID 的令牌 (先校验归属)。
 // 只更新请求体中显式提供 (非 nil) 的字段。
 //
-// ⚠️ 缓存一致性 (ADR-001): 同 DeleteToken, 改 status/额度后 New-API 的 Redis
-// 缓存不会失效, 旧值在 TTL 内仍生效。TODO(联调后切换): 改调 New-API PUT /api/token/。
+// ✅ 数据一致性 (ADR-001): 调用 New-API PUT /api/token/ 更新，让 New-API 自己失效缓存。
 func (s *TokenService) UpdateToken(userID, tokenID int, in UpdateTokenInput) (*models.Token, error) {
 	// 先校验归属: 不存在或非本人的 token 返回 ErrTokenNotFound。
 	if _, err := s.GetToken(userID, tokenID); err != nil {
@@ -255,11 +258,18 @@ func (s *TokenService) UpdateToken(userID, tokenID int, in UpdateTokenInput) (*m
 	}
 
 	if len(updates) > 0 {
-		// 再次带 user_id 约束, 双重防越权。
-		if err := s.db.Model(&models.Token{}).
-			Where("id = ? AND user_id = ?", tokenID, userID).
-			Updates(updates).Error; err != nil {
-			return nil, err
+		// 调用 New-API 更新（自动失效缓存）
+		if s.newAPIClient != nil {
+			if err := s.newAPIClient.UpdateToken(tokenID, updates); err != nil {
+				return nil, err
+			}
+		} else {
+			// 降级：直接写库（仅测试环境，生产必须走 New-API）
+			if err := s.db.Model(&models.Token{}).
+				Where("id = ? AND user_id = ?", tokenID, userID).
+				Updates(updates).Error; err != nil {
+				return nil, err
+			}
 		}
 	}
 
@@ -269,18 +279,19 @@ func (s *TokenService) UpdateToken(userID, tokenID int, in UpdateTokenInput) (*m
 
 // DeleteToken 软删除归属于 userID 的令牌 (先校验归属)。
 //
-// ⚠️ 缓存一致性 (ADR-001): New-API 用 Redis 缓存 token (键 token:HMAC(key))。
-// 直接写库删除后, 若 New-API 启用了 Redis, 缓存里的旧 token 不会失效,
-// Agent 用已删除的 key 在缓存 TTL 内仍能调用 AI。
-// TODO(联调后切换): 改为调 New-API DELETE /api/token/:id, 让 New-API 自己失效缓存。
-// 当前 New-API 未部署且缓存失效键为 HMAC 加密 (LeapNode 无密钥), 暂保留直接写库。
-// 缓解: New-API 未启用 Redis 时无此问题; 启用时缓存 TTL 通常较短。
+// ✅ 数据一致性 (ADR-001): 调用 New-API DELETE /api/token/:id，让 New-API 自己失效缓存。
 func (s *TokenService) DeleteToken(userID, tokenID int) error {
 	token, err := s.GetToken(userID, tokenID)
 	if err != nil {
 		return err
 	}
-	// GORM 软删除 (tokens.deleted_at)。带 user_id 约束双重防越权。
+	
+	// 调用 New-API 删除（自动失效缓存）
+	if s.newAPIClient != nil {
+		return s.newAPIClient.DeleteToken(token.Id)
+	}
+	
+	// 降级：直接写库（仅测试环境，生产必须走 New-API）
 	return s.db.Where("id = ? AND user_id = ?", token.Id, userID).Delete(&models.Token{}).Error
 }
 
