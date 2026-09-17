@@ -398,9 +398,61 @@ func main() {
 			return
 		}
 		c.JSON(200, gin.H{"success": true, "table": table, "col": col, "data_type": dataType})
-	})
+		})
 
-	go func() {
+		// 临时：查询返佣记录（GET /bootstrap/aff-check?secret=xxx&user_id=28）
+		router.GET("/bootstrap/aff-check", func(c *gin.Context) {
+		if !bootstrapGuard(c) {
+			return
+		}
+		userID := c.Query("user_id")
+		if userID == "" {
+			c.JSON(400, gin.H{"error": "user_id required"})
+			return
+		}
+	
+		// 查用户 aff_quota
+		var affQuota float64
+		err := sqlDB.QueryRow(`SELECT aff_quota FROM users WHERE id=$1`, userID).Scan(&affQuota)
+		if err != nil {
+			c.JSON(500, gin.H{"error": "query user: " + err.Error()})
+			return
+		}
+	
+		// 查返佣记录
+		rows, err := sqlDB.Query(`
+			SELECT id, inviter_id, invitee_id, event_type, amount_cny, created_at 
+			FROM affiliate_earnings 
+			WHERE inviter_id=$1 OR invitee_id=$1 
+			ORDER BY created_at DESC LIMIT 10
+		`, userID)
+		if err != nil {
+			c.JSON(500, gin.H{"error": "query earnings: " + err.Error()})
+			return
+		}
+		defer rows.Close()
+	
+		type Record struct {
+			ID        int       `json:"id"`
+			InviterID int       `json:"inviter_id"`
+			InviteeID int       `json:"invitee_id"`
+			EventType string    `json:"event_type"`
+			AmountCNY float64   `json:"amount_cny"`
+			CreatedAt time.Time `json:"created_at"`
+		}
+		var records []Record
+		for rows.Next() {
+			var r Record
+			if err := rows.Scan(&r.ID, &r.InviterID, &r.InviteeID, &r.EventType, &r.AmountCNY, &r.CreatedAt); err != nil {
+				continue
+			}
+			records = append(records, r)
+		}
+	
+		c.JSON(200, gin.H{"success": true, "user_id": userID, "aff_quota": affQuota, "earnings": records})
+		})
+
+		go func() {
 		log.Printf("leapnode-backend listening on %s", httpAddr)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("http server error: %v", err)
