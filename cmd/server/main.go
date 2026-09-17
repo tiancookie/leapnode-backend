@@ -421,9 +421,9 @@ func main() {
 	
 		// 查返佣记录
 		rows, err := sqlDB.Query(`
-			SELECT id, inviter_id, invitee_id, event_type, amount_cny, created_at 
+			SELECT id, user_id, invitee_id, event_type, quota, EXTRACT(EPOCH FROM created_at)::bigint 
 			FROM affiliate_earnings 
-			WHERE inviter_id=$1 OR invitee_id=$1 
+			WHERE user_id=$1 OR invitee_id=$1 
 			ORDER BY created_at DESC LIMIT 10
 		`, userID)
 		if err != nil {
@@ -431,19 +431,19 @@ func main() {
 			return
 		}
 		defer rows.Close()
-	
+
 		type Record struct {
-			ID        int       `json:"id"`
-			InviterID int       `json:"inviter_id"`
-			InviteeID int       `json:"invitee_id"`
-			EventType string    `json:"event_type"`
-			AmountCNY float64   `json:"amount_cny"`
-			CreatedAt time.Time `json:"created_at"`
+			ID        int    `json:"id"`
+			UserID    int    `json:"user_id"`
+			InviteeID int    `json:"invitee_id"`
+			EventType string `json:"event_type"`
+			Quota     int64  `json:"quota"`
+			CreatedAt int64  `json:"created_at"`
 		}
 		var records []Record
 		for rows.Next() {
 			var r Record
-			if err := rows.Scan(&r.ID, &r.InviterID, &r.InviteeID, &r.EventType, &r.AmountCNY, &r.CreatedAt); err != nil {
+			if err := rows.Scan(&r.ID, &r.UserID, &r.InviteeID, &r.EventType, &r.Quota, &r.CreatedAt); err != nil {
 				continue
 			}
 			records = append(records, r)
