@@ -335,6 +335,52 @@ func main() {
 		c.JSON(200, gin.H{"success": true, "trade_no": tradeNo, "status": "success"})
 	})
 
+	// 临时：诊断/清理 New-API session（GET 查表，POST 清理）
+	// GET  /bootstrap/sessions?secret=xxx  — 列出 session/token 相关表
+	// POST /bootstrap/sessions?secret=xxx&table=sessions — 清空指定表
+	router.GET("/bootstrap/sessions", func(c *gin.Context) {
+		if !bootstrapGuard(c) {
+			return
+		}
+		rows, err := sqlDB.Query(`SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename`)
+		if err != nil {
+			c.JSON(500, gin.H{"error": err.Error()})
+			return
+		}
+		defer rows.Close()
+		var tables []string
+		for rows.Next() {
+			var t string
+			_ = rows.Scan(&t)
+			tables = append(tables, t)
+		}
+		c.JSON(200, gin.H{"success": true, "tables": tables})
+	})
+
+	router.POST("/bootstrap/sessions", func(c *gin.Context) {
+		if !bootstrapGuard(c) {
+			return
+		}
+		table := c.Query("table")
+		if table == "" {
+			c.JSON(400, gin.H{"error": "table required"})
+			return
+		}
+		// 白名单校验，防 SQL 注入
+		allowed := map[string]bool{"sessions": true, "user_sessions": true, "auth_sessions": true}
+		if !allowed[table] {
+			c.JSON(400, gin.H{"error": "table not in whitelist"})
+			return
+		}
+		res, err := sqlDB.Exec("DELETE FROM " + table)
+		if err != nil {
+			c.JSON(500, gin.H{"error": err.Error()})
+			return
+		}
+		n, _ := res.RowsAffected()
+		c.JSON(200, gin.H{"success": true, "table": table, "deleted": n})
+	})
+
 	go func() {
 		log.Printf("leapnode-backend listening on %s", httpAddr)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
