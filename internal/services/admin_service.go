@@ -72,7 +72,7 @@ func (s *AdminService) GetDashboardStats() (*DashboardStats, error) {
 	today := time.Now().Truncate(24 * time.Hour).Unix()
 	var dailyActiveUsers int64
 	if err := s.db.Model(&models.User{}).
-		Where("status = ? AND created_time < ?", 1, today).
+		Where("status = ? AND created_at < ?", 1, today).
 		Where("request_count > ?", 0).
 		Count(&dailyActiveUsers).Error; err != nil {
 		return nil, err
@@ -129,7 +129,7 @@ func (s *AdminService) GetDashboardCharts() (*ChartData, error) {
 
 		var dailyUsers int64
 		s.db.Model(&models.User{}).
-			Where("created_time >= ? AND created_time < ?", startOfDay, endOfDay).
+			Where("created_at >= ? AND created_at < ?", startOfDay, endOfDay).
 			Count(&dailyUsers)
 
 		data.UserGrowthChart = append(data.UserGrowthChart, ChartPoint{
