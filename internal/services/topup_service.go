@@ -697,7 +697,7 @@ func (s *TopupService) ConfirmCryptoOrderPaid(tradeNo, txHash string) error {
 		}
 
 		// 写 topup_orders 历史 (统一充值记录)。
-		paidUnix := now.Unix()
+		paidTime := now
 		history := models.TopupOrder{
 			ID:            order.TradeNo,
 			UserID:        order.UserID,
@@ -706,7 +706,7 @@ func (s *TopupService) ConfirmCryptoOrderPaid(tradeNo, txHash string) error {
 			PaymentMethod: "crypto",
 			TradeNo:       order.TradeNo,
 			Status:        1, // 1=已支付
-			PaidAt:        &paidUnix,
+			PaidAt:        &paidTime,
 		}
 		if err := tx.Create(&history).Error; err != nil {
 			return err

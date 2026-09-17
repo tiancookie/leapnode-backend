@@ -315,9 +315,9 @@ type TopupOrder struct {
 	Quota         int64   `gorm:"column:quota" json:"quota"`
 	PaymentMethod string  `gorm:"column:payment_method" json:"payment_method"`
 	TradeNo       string  `gorm:"column:trade_no" json:"trade_no"`
-	Status        int     `gorm:"column:status;default:0" json:"status"` // 0=待支付 1=已支付 2=失败
-	PaidAt        *int64  `gorm:"column:paid_at" json:"paid_at,omitempty"`
-	CreatedAt     int64   `gorm:"column:created_at;autoCreateTime:milli" json:"created_at"`
+	Status        int        `gorm:"column:status;default:0" json:"status"` // 0=待支付 1=已支付 2=失败
+	PaidAt        *time.Time `gorm:"column:paid_at" json:"paid_at,omitempty"`
+	CreatedAt     int64      `gorm:"column:created_at;autoCreateTime:milli" json:"created_at"`
 }
 
 func (TopupOrder) TableName() string {
