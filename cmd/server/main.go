@@ -317,6 +317,24 @@ func main() {
 		c.JSON(200, gin.H{"success": true, "user_id": userID, "role": 100})
 	})
 
+	// 临时：确认加密货币充值到账（POST /bootstrap/confirm-crypto?trade_no=xxx&secret=xxx）
+	// 模拟链上对账/后台审核，触发 quota 入账 + 首充返佣。用于测试批10返佣闭环。
+	router.POST("/bootstrap/confirm-crypto", func(c *gin.Context) {
+		if !bootstrapGuard(c) {
+			return
+		}
+		tradeNo := c.Query("trade_no")
+		if tradeNo == "" {
+			c.JSON(400, gin.H{"error": "trade_no required"})
+			return
+		}
+		if err := topupService.ConfirmCryptoOrderPaid(tradeNo, "BOOTSTRAP_TEST_TX"); err != nil {
+			c.JSON(500, gin.H{"error": "confirm failed: " + err.Error()})
+			return
+		}
+		c.JSON(200, gin.H{"success": true, "trade_no": tradeNo, "status": "success"})
+	})
+
 	go func() {
 		log.Printf("leapnode-backend listening on %s", httpAddr)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
