@@ -299,6 +299,24 @@ func main() {
 		c.JSON(200, gin.H{"success": true, "merchant_id": mid, "user_id": userID, "user_level": 2})
 	})
 
+	// 临时：初始化管理员（POST /bootstrap/init-admin?user_id=34&secret=xxx）
+	// 提升用户为 root（role=100），用于测试总站管理后台。
+	router.POST("/bootstrap/init-admin", func(c *gin.Context) {
+		if !bootstrapGuard(c) {
+			return
+		}
+		userID := c.Query("user_id")
+		if userID == "" {
+			c.JSON(400, gin.H{"error": "user_id required"})
+			return
+		}
+		if _, err := sqlDB.Exec(`UPDATE users SET role = 100 WHERE id = $1`, userID); err != nil {
+			c.JSON(500, gin.H{"error": "update role failed: " + err.Error()})
+			return
+		}
+		c.JSON(200, gin.H{"success": true, "user_id": userID, "role": 100})
+	})
+
 	go func() {
 		log.Printf("leapnode-backend listening on %s", httpAddr)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
