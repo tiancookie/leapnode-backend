@@ -258,7 +258,7 @@ func (s *AffService) GetInvitees(userID int) (map[string]interface{}, error) {
 		var firstTopupAt string
 		var topup models.TopupOrder
 		if err := s.db.Where("user_id = ?", u.ID).Order("created_at ASC").First(&topup).Error; err == nil {
-			firstTopupAt = time.Unix(0, topup.CreatedAt*int64(time.Millisecond)).Format("2006-01-02 15:04:05")
+			firstTopupAt = topup.CreatedAt.Format("2006-01-02 15:04:05")
 		}
 
 		level1List = append(level1List, map[string]interface{}{
@@ -279,7 +279,7 @@ func (s *AffService) GetInvitees(userID int) (map[string]interface{}, error) {
 				var firstTopupAt string
 				var topup models.TopupOrder
 				if err := s.db.Where("user_id = ?", u.ID).Order("created_at ASC").First(&topup).Error; err == nil {
-					firstTopupAt = time.Unix(0, topup.CreatedAt*int64(time.Millisecond)).Format("2006-01-02 15:04:05")
+					firstTopupAt = topup.CreatedAt.Format("2006-01-02 15:04:05")
 				}
 
 				level2List = append(level2List, map[string]interface{}{

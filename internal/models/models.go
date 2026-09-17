@@ -317,7 +317,7 @@ type TopupOrder struct {
 	TradeNo       string  `gorm:"column:trade_no" json:"trade_no"`
 	Status        int        `gorm:"column:status;default:0" json:"status"` // 0=待支付 1=已支付 2=失败
 	PaidAt        *time.Time `gorm:"column:paid_at" json:"paid_at,omitempty"`
-	CreatedAt     int64      `gorm:"column:created_at;autoCreateTime:milli" json:"created_at"`
+	CreatedAt     time.Time  `gorm:"column:created_at" json:"created_at"`
 }
 
 func (TopupOrder) TableName() string {
