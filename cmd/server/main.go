@@ -381,6 +381,25 @@ func main() {
 		c.JSON(200, gin.H{"success": true, "table": table, "deleted": n})
 	})
 
+	// 临时：查列类型（GET /bootstrap/coltype?secret=xxx&table=topup_orders&col=paid_at）
+	router.GET("/bootstrap/coltype", func(c *gin.Context) {
+		if !bootstrapGuard(c) {
+			return
+		}
+		table := c.Query("table")
+		col := c.Query("col")
+		var dataType string
+		err := sqlDB.QueryRow(
+			`SELECT data_type FROM information_schema.columns WHERE table_name=$1 AND column_name=$2`,
+			table, col,
+		).Scan(&dataType)
+		if err != nil {
+			c.JSON(500, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(200, gin.H{"success": true, "table": table, "col": col, "data_type": dataType})
+	})
+
 	go func() {
 		log.Printf("leapnode-backend listening on %s", httpAddr)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
