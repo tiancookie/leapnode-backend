@@ -10,6 +10,9 @@ import (
 	"os"
 	"sync"
 	"time"
+
+	"github.com/tiancookie/leapnode-backend/internal/models"
+	"gorm.io/gorm"
 )
 
 // NewAPIClient 封装对 New-API 的 HTTP 调用，避免直接写 users 表。
@@ -19,6 +22,7 @@ import (
 type NewAPIClient struct {
 	baseURL    string
 	httpClient *http.Client
+	db         *gorm.DB // 共享数据库连接（用于反查 New-API 创建的用户）
 
 	// root 管理员账密（用于自动登录刷新 token）
 	adminUsername string
@@ -31,7 +35,7 @@ type NewAPIClient struct {
 }
 
 // NewNewAPIClient 创建 New-API 客户端。
-func NewNewAPIClient() *NewAPIClient {
+func NewNewAPIClient(db *gorm.DB) *NewAPIClient {
 	baseURL := os.Getenv("NEW_API_BASE_URL")
 	if baseURL == "" {
 		baseURL = "http://new-api.railway.internal:3000" // Railway 内网默认
@@ -47,6 +51,7 @@ func NewNewAPIClient() *NewAPIClient {
 		httpClient: &http.Client{
 			Timeout: 10 * time.Second,
 		},
+		db:            db,
 		adminUsername: adminUsername,
 		adminPassword: adminPassword,
 	}
@@ -161,9 +166,15 @@ func (c *NewAPIClient) CreateUser(username, password, email string) (int, error)
 		return 0, fmt.Errorf("New-API error: %s", result.Message)
 	}
 
-	// New-API register 接口可能不返回 id，需要按 username 反查
+	// New-API register 接口可能不返回 id，需要反查
 	if result.Data.ID == 0 {
-		return c.getUserIDByUsername(username)
+		// 改用本地数据库查询（New-API AutoMigrate 已同步到共享 PostgreSQL）
+		// 避免依赖 New-API admin token（可能过期/失效）
+		var user models.User
+		if err := c.db.Where("username = ?", username).First(&user).Error; err != nil {
+			return 0, fmt.Errorf("user created but not found in local DB: %w", err)
+		}
+		return user.ID, nil
 	}
 
 	return result.Data.ID, nil

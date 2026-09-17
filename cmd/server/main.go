@@ -78,7 +78,7 @@ func main() {
 	})
 
 	// --- New-API HTTP 客户端 (用于调用 New-API 管理接口，避免直接写 users 表) ---
-	newAPIClient := services.NewNewAPIClient()
+	newAPIClient := services.NewNewAPIClient(db)
 
 	// /api/dist/* 契约需与 SubRouter 前端 100% 兼容, 在 internal/controllers 中逐步实现
 	siteService := services.NewSiteService(db)
